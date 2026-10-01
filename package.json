@@ -1,0 +1,11 @@
+{
+  "name": "hackstreet-pesamatters",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "test": "npm run test -w hackstreet-server && npm run test -w hackstreet-client",
+    "typecheck": "npm run typecheck -w hackstreet-server && npm run typecheck -w hackstreet-client",
+    "db": "docker compose up -d"
+  }
+}

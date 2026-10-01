@@ -1,0 +1,21 @@
+# Local MariaDB only. Do not point this at production.
+services:
+  db:
+    image: mariadb:11.8.2
+    environment:
+      MARIADB_DATABASE: pesamatters
+      MARIADB_USER: pesamatters
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${MYSQL_PORT:-3310}:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - pesamatters-db:/var/lib/mysql
+
+volumes:
+  pesamatters-db:

@@ -1,0 +1,22 @@
+{
+  "name": "hackstreet-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "start": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/ledger.test.ts test/google.test.ts test/returnTo.test.ts test/quotes.test.ts test/mpesa.test.ts test/loans.test.ts"
+  },
+  "dependencies": {
+    "dotenv": "16.6.1",
+    "express": "^4.22.3",
+    "mysql2": "^3.24.5",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.21",
+    "@types/node": "22.15.3",
+    "typescript": "5.8.3"
+  }
+}

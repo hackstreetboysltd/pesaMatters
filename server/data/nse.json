@@ -1,0 +1,258 @@
+[
+  {
+    "symbol": "ABSA",
+    "name": "Absa Bank Kenya Plc"
+  },
+  {
+    "symbol": "GLD",
+    "name": "Absa NewGold ETF"
+  },
+  {
+    "symbol": "ARM",
+    "name": "ARM Cement Limited"
+  },
+  {
+    "symbol": "BAMB",
+    "name": "Bamburi Cement Limited"
+  },
+  {
+    "symbol": "BKG",
+    "name": "BK Group Plc"
+  },
+  {
+    "symbol": "BOC",
+    "name": "BOC Kenya Limited"
+  },
+  {
+    "symbol": "BRIT",
+    "name": "Britam Holdings Limited"
+  },
+  {
+    "symbol": "BAT",
+    "name": "British American Tobacco Kenya"
+  },
+  {
+    "symbol": "CGEN",
+    "name": "Car and General Kenya Limited"
+  },
+  {
+    "symbol": "CARB",
+    "name": "Carbacid Investments Limited"
+  },
+  {
+    "symbol": "CTUM",
+    "name": "Centum Investment Company"
+  },
+  {
+    "symbol": "CIC",
+    "name": "CIC Insurance Group Limited"
+  },
+  {
+    "symbol": "COOP",
+    "name": "Co-operative Bank of Kenya Limited"
+  },
+  {
+    "symbol": "CRWN",
+    "name": "Crown Paints Kenya Limited"
+  },
+  {
+    "symbol": "DCON",
+    "name": "Deacons East Africa Plc"
+  },
+  {
+    "symbol": "DTK",
+    "name": "Diamond Trust Bank Kenya Limited"
+  },
+  {
+    "symbol": "EGAD",
+    "name": "Eaagads Limited"
+  },
+  {
+    "symbol": "EABL",
+    "name": "East African Breweries Limited"
+  },
+  {
+    "symbol": "CABL",
+    "name": "East African Cables Limited"
+  },
+  {
+    "symbol": "PORT",
+    "name": "East African Portland Cement Co. Ltd"
+  },
+  {
+    "symbol": "EQTY",
+    "name": "Equity Group Holdings Limited"
+  },
+  {
+    "symbol": "EVRD",
+    "name": "Eveready East Africa Limited"
+  },
+  {
+    "symbol": "XPRS",
+    "name": "Express Kenya Limited"
+  },
+  {
+    "symbol": "FTGH",
+    "name": "Flame Tree Group Holdings Limited"
+  },
+  {
+    "symbol": "HFCK",
+    "name": "HF Group Limited"
+  },
+  {
+    "symbol": "HAFR",
+    "name": "Home Afrika Limited"
+  },
+  {
+    "symbol": "HBE",
+    "name": "Homeboyz Entertainment"
+  },
+  {
+    "symbol": "IMH",
+    "name": "I&M Holdings Plc"
+  },
+  {
+    "symbol": "FAHR",
+    "name": "ILAM Fahari I-REIT"
+  },
+  {
+    "symbol": "JUB",
+    "name": "Jubilee Holdings Limited"
+  },
+  {
+    "symbol": "KUKZ",
+    "name": "Kakuzi Limited"
+  },
+  {
+    "symbol": "KAPC",
+    "name": "Kapchorua Tea Company Limited"
+  },
+  {
+    "symbol": "KCB",
+    "name": "KCB Group Limited"
+  },
+  {
+    "symbol": "KEGN",
+    "name": "KenGen Plc"
+  },
+  {
+    "symbol": "KQ",
+    "name": "Kenya Airways Limited"
+  },
+  {
+    "symbol": "ORCH",
+    "name": "Kenya Orchards Limited"
+  },
+  {
+    "symbol": "KPLC",
+    "name": "Kenya Power & Lighting Company"
+  },
+  {
+    "symbol": "KNRE",
+    "name": "Kenya Re-Insurance Corporation Ltd"
+  },
+  {
+    "symbol": "KURV",
+    "name": "Kurwitu Ventures Limited"
+  },
+  {
+    "symbol": "LAPR",
+    "name": "Laptrust Imara Income-REIT"
+  },
+  {
+    "symbol": "LBTY",
+    "name": "Liberty Kenya Holdings Limited"
+  },
+  {
+    "symbol": "LIMT",
+    "name": "Limuru Tea Company Limited"
+  },
+  {
+    "symbol": "LKL",
+    "name": "Longhorn Publishers Limited"
+  },
+  {
+    "symbol": "MSC",
+    "name": "Mumias Sugar Company Limited"
+  },
+  {
+    "symbol": "NBV",
+    "name": "Nairobi Business Ventures Ltd"
+  },
+  {
+    "symbol": "NSE",
+    "name": "Nairobi Securities Exchange Limited"
+  },
+  {
+    "symbol": "NMG",
+    "name": "Nation Media Group"
+  },
+  {
+    "symbol": "NCBA",
+    "name": "NCBA Group Plc"
+  },
+  {
+    "symbol": "OCH",
+    "name": "Olympia Capital Holdings Limited"
+  },
+  {
+    "symbol": "SCOM",
+    "name": "Safaricom Plc"
+  },
+  {
+    "symbol": "SMER",
+    "name": "Sameer Africa Plc"
+  },
+  {
+    "symbol": "SLAM",
+    "name": "Sanlam Kenya Plc"
+  },
+  {
+    "symbol": "SASN",
+    "name": "Sasini Tea and Coffee Limited"
+  },
+  {
+    "symbol": "SCAN",
+    "name": "ScanGroup Limited"
+  },
+  {
+    "symbol": "SBIC",
+    "name": "Stanbic Holdings Limited"
+  },
+  {
+    "symbol": "SCBK",
+    "name": "Standard Chartered Bank Limited"
+  },
+  {
+    "symbol": "SGL",
+    "name": "Standard Group Limited"
+  },
+  {
+    "symbol": "TOTL",
+    "name": "Total Kenya Limited"
+  },
+  {
+    "symbol": "TPSE",
+    "name": "TPS Eastern Africa Serena Limited"
+  },
+  {
+    "symbol": "TCL",
+    "name": "Trans Century Limited"
+  },
+  {
+    "symbol": "UCHM",
+    "name": "Uchumi Supermarket Limited"
+  },
+  {
+    "symbol": "UMME",
+    "name": "Umeme Limited"
+  },
+  {
+    "symbol": "UNGA",
+    "name": "Unga Group Limited"
+  },
+  {
+    "symbol": "WTK",
+    "name": "Williamson Tea Kenya Limited"
+  }
+]
