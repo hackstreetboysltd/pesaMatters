@@ -101,7 +101,23 @@ export function createPool(databaseUrl: string): Pool {
 
 /** Apply schema.sql. Prefer `npm run db:migrate` over calling this on every request. */
 export async function applySchema(pool: Db): Promise<void> {
-  const sql = readFileSync(join(here, "..", "sql", "schema.sql"), "utf8");
+  const candidates = [
+    join(here, "..", "sql", "schema.sql"),
+    join(process.cwd(), "server", "sql", "schema.sql"),
+    join(process.cwd(), "sql", "schema.sql"),
+  ];
+  let sql: string | null = null;
+  for (const path of candidates) {
+    try {
+      sql = readFileSync(path, "utf8");
+      break;
+    } catch {
+      continue;
+    }
+  }
+  if (sql === null) {
+    throw new Error("schema.sql not found");
+  }
   await pool.query(sql);
 }
 
