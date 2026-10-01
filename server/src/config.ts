@@ -28,6 +28,9 @@ const Env = z.object({
   DESK_PASSWORD: z.preprocess(emptyAsUnset, z.string().min(10).max(200).optional()),
   UPSTASH_REDIS_REST_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
   UPSTASH_REDIS_REST_TOKEN: z.preprocess(emptyAsUnset, z.string().min(8).max(500).optional()),
+  // Vercel Marketplace Upstash / KV names
+  KV_REST_API_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
+  KV_REST_API_TOKEN: z.preprocess(emptyAsUnset, z.string().min(8).max(500).optional()),
   CRON_SECRET: z.preprocess(emptyAsUnset, z.string().min(16).max(200).optional()),
 });
 
@@ -87,8 +90,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if ((deskEmail === null) !== (deskPassword === null)) {
     throw new Error("Invalid configuration: DESK_EMAIL");
   }
-  const upstashUrl = parsed.data.UPSTASH_REDIS_REST_URL ?? null;
-  const upstashToken = parsed.data.UPSTASH_REDIS_REST_TOKEN ?? null;
+  const upstashUrl = parsed.data.UPSTASH_REDIS_REST_URL ?? parsed.data.KV_REST_API_URL ?? null;
+  const upstashToken = parsed.data.UPSTASH_REDIS_REST_TOKEN ?? parsed.data.KV_REST_API_TOKEN ?? null;
   if ((upstashUrl === null) !== (upstashToken === null)) {
     throw new Error("Invalid configuration: UPSTASH_REDIS_REST_URL");
   }

@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import dns from "node:dns";
 import pg from "pg";
+
+// Neon DNS often returns IPv6 first; some local networks refuse it (EACCES).
+dns.setDefaultResultOrder("ipv4first");
 
 const here = dirname(fileURLToPath(import.meta.url));
 

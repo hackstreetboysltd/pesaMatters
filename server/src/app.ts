@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import type { AppConfig } from "./config.ts";
-import type { Db } from "./db.ts";
+import { applySchema, type Db } from "./db.ts";
 import { log } from "./logger.ts";
 import {
   exchangeGoogleCode,
@@ -16,7 +16,7 @@ import { liveRails, mockRails, type Rails } from "./mpesa/client.ts";
 import { B2cResultBody, receiptFromB2c, receiptFromStk, StkCallbackBody } from "./mpesa/callback.ts";
 import { kenyanMsisdn } from "./mpesa/phone.ts";
 import { registerDeskRoutes, registerMemberLoanRoutes } from "./loans/http.ts";
-import { LoanError } from "./loans/service.ts";
+import { ensureDeskAdmin, LoanError, seedLoanProducts } from "./loans/service.ts";
 import { PaymentError, applyDarajaResult, checkPayment, receiptFile, receiptFor, startPayment } from "./payments.ts";
 import {
   QuoteError,
@@ -33,6 +33,7 @@ import {
   activityFor,
   appendEntry,
   closeSession,
+  ensureGenesis,
   getInvestment,
   homeFor,
   listBlocks,
@@ -43,6 +44,7 @@ import {
   memberFromToken,
   newCsrfToken,
   openSession,
+  seedCrew,
   verifyStoredChain,
   type Member,
 } from "./store.ts";
@@ -237,6 +239,24 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
     }),
   );
 
+  // One-shot (idempotent) schema + seed from Vercel when local TCP to Neon is blocked.
+  app.post(
+    "/api/cron/bootstrap",
+    asyncRoute(async (req, res) => {
+      const secret = config.cronSecret;
+      const auth = req.header("authorization");
+      if (secret === null || auth !== `Bearer ${secret}`) {
+        throw new HttpError(401, "unauthorized", "Cron secret does not match.");
+      }
+      await applySchema(pool);
+      await ensureGenesis(pool);
+      await seedCrew(pool, config.seedPassword);
+      await seedLoanProducts(pool);
+      await ensureDeskAdmin(pool, config.deskEmail, config.deskPassword);
+      res.json({ ok: true, bootstrapped: true });
+    }),
+  );
+
   app.get("/api/auth/csrf", (req, res) => {
     const cookies = cookiesOf(req);
     const current = cookies[CSRF];
@@ -246,7 +266,13 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
   });
 
   app.use((req, _res, next) => {
-    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS" || MPESA_CALLBACKS.has(req.path)) {
+    if (
+      req.method === "GET" ||
+      req.method === "HEAD" ||
+      req.method === "OPTIONS" ||
+      MPESA_CALLBACKS.has(req.path) ||
+      req.path.startsWith("/api/cron/")
+    ) {
       next();
       return;
     }
