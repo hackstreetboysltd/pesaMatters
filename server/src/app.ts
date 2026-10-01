@@ -26,6 +26,8 @@ import {
   type CloseQuote,
   type QuoteSource,
 } from "./quotes.ts";
+import { createRateLimiter } from "./ratelimit.ts";
+import { refreshCloses } from "./closes.ts";
 import { nseShares } from "./symbols.ts";
 import {
   activityFor,
@@ -107,21 +109,6 @@ export class HttpError extends Error {
   }
 }
 
-const attempts = new Map<string, { count: number; resetAt: number }>();
-
-function rateLimit(key: string): void {
-  const now = Date.now();
-  const slot = attempts.get(key);
-  if (slot === undefined || slot.resetAt < now) {
-    attempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
-    return;
-  }
-  slot.count += 1;
-  if (slot.count > 20) {
-    throw new HttpError(429, "rate_limited", "Too many sign-in attempts. Wait a few minutes and try again.");
-  }
-}
-
 function cookiesOf(req: Request): Record<string, string> {
   const header = req.headers.cookie;
   if (header === undefined) return {};
@@ -198,8 +185,10 @@ function asyncRoute(fn: (req: Request, res: Response) => Promise<void>) {
 
 export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = createQuoteSource()): express.Express {
   const rails: Rails = config.mpesa.mode === "live" ? liveRails(config.mpesa) : mockRails();
+  const limiter = createRateLimiter(config.upstashUrl, config.upstashToken);
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -234,6 +223,19 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
+
+  app.get(
+    "/api/cron/closes",
+    asyncRoute(async (req, res) => {
+      const secret = config.cronSecret;
+      const auth = req.header("authorization");
+      if (secret === null || auth !== `Bearer ${secret}`) {
+        throw new HttpError(401, "unauthorized", "Cron secret does not match.");
+      }
+      const result = await refreshCloses(pool, quotes);
+      res.json({ ok: true, ...result });
+    }),
+  );
 
   app.get("/api/auth/csrf", (req, res) => {
     const cookies = cookiesOf(req);
@@ -290,7 +292,10 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
   app.post(
     "/api/auth/google/callback",
     asyncRoute(async (req, res) => {
-      rateLimit(`login:${req.ip ?? "unknown"}`);
+      const limited = await limiter.limit(`login:${req.ip ?? "unknown"}`);
+      if (!limited.success) {
+        throw new HttpError(429, "rate_limited", "Too many sign-in attempts. Wait a few minutes and try again.");
+      }
       if (config.google === null) rejectGoogle("google_off");
       const parsed = GoogleCallbackBody.safeParse(req.body);
       if (!parsed.success) rejectGoogle("google_state");

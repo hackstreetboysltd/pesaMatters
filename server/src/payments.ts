@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import type { RowDataPacket } from "mysql2";
-import type { Db } from "./db.ts";
+import type { Db, Row } from "./db.ts";
+import { isUniqueViolation } from "./db.ts";
 import { MoneyError } from "./money.ts";
 import type { Rails } from "./mpesa/client.ts";
 import { stkOutcome } from "./mpesa/daraja.ts";
@@ -78,12 +78,14 @@ function asStatus(value: string): PaymentStatus {
   throw new PaymentError(500, "server_error", "Something went wrong. Try again.");
 }
 
-function isoFromMysql(value: string): string {
-  if (value.endsWith("Z")) return value;
+function isoFromDb(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "string") return new Date(Number(value)).toISOString();
+  if (value.endsWith("Z") || value.includes("T")) return new Date(value).toISOString();
   return `${value.replace(" ", "T")}Z`;
 }
 
-type Joined = RowDataPacket & {
+type Joined = Row & {
   id: string;
   member_id: string;
   kind: string;
@@ -115,7 +117,7 @@ function fromJoined(row: Joined): PaymentRow {
     resultCode: row.result_code,
     blockId: row.block_id === null ? null : Number(row.block_id),
     blockHash: typeof row.block_hash === "string" ? row.block_hash : null,
-    createdAt: isoFromMysql(String(row.created_at)),
+    createdAt: isoFromDb(row.created_at),
     actorName: row.actor_name,
     counterpartyName: row.counterparty_name,
   };
@@ -132,13 +134,13 @@ const SELECT_JOIN = `
 `;
 
 async function byId(pool: Db, id: string): Promise<PaymentRow | null> {
-  const [rows] = await pool.query<Joined[]>(`${SELECT_JOIN} WHERE p.id = ?`, [id]);
+  const [rows] = await pool.query<Joined>(`${SELECT_JOIN} WHERE p.id = ?`, [id]);
   const row = rows[0];
   return row === undefined ? null : fromJoined(row);
 }
 
 async function byCheckout(pool: Db, checkoutOrMerchant: string): Promise<PaymentRow | null> {
-  const [rows] = await pool.query<Joined[]>(
+  const [rows] = await pool.query<Joined>(
     `${SELECT_JOIN} WHERE p.checkout_request_id = ? OR p.merchant_request_id = ? LIMIT 1`,
     [checkoutOrMerchant, checkoutOrMerchant],
   );
@@ -184,7 +186,7 @@ function sameAttempt(row: PaymentRow, input: StartInput): boolean {
 }
 
 async function existingAttempt(pool: Db, input: StartInput): Promise<PaymentRow | null> {
-  const [rows] = await pool.query<Joined[]>(`${SELECT_JOIN} WHERE p.member_id = ? AND p.idempotency_key = ?`, [
+  const [rows] = await pool.query<Joined>(`${SELECT_JOIN} WHERE p.member_id = ? AND p.idempotency_key = ?`, [
     input.memberId,
     input.idempotencyKey,
   ]);
@@ -198,7 +200,7 @@ async function existingAttempt(pool: Db, input: StartInput): Promise<PaymentRow 
 }
 
 async function assertFunds(pool: Db, memberId: string, amountCents: number, needCash: boolean): Promise<void> {
-  const [claims] = await pool.query<RowDataPacket[]>("SELECT claim_cents FROM claims WHERE member_id = ?", [memberId]);
+  const [claims] = await pool.query<Row>("SELECT claim_cents FROM claims WHERE member_id = ?", [memberId]);
   const claim = Number(claims[0]?.["claim_cents"] ?? NaN);
   if (!Number.isInteger(claim)) {
     throw new PaymentError(404, "unknown_member", "That member is not in the crew.");
@@ -207,7 +209,7 @@ async function assertFunds(pool: Db, memberId: string, amountCents: number, need
     throw new PaymentError(422, "insufficient_claim", "That is more than you can move.");
   }
   if (!needCash) return;
-  const [cashRows] = await pool.query<RowDataPacket[]>("SELECT cash_cents FROM treasury WHERE id = 1");
+  const [cashRows] = await pool.query<Row>("SELECT cash_cents FROM treasury WHERE id = 1");
   const cash = Number(cashRows[0]?.["cash_cents"] ?? 0);
   if (cash < amountCents) {
     throw new PaymentError(
@@ -222,18 +224,18 @@ async function assertCounterparty(pool: Db, memberId: string, toMemberId: string
   if (memberId === toMemberId) {
     throw new PaymentError(422, "same_member", "Choose a different member.");
   }
-  const [rows] = await pool.query<RowDataPacket[]>("SELECT id FROM members WHERE id = ?", [toMemberId]);
+  const [rows] = await pool.query<Row>("SELECT id FROM members WHERE id = ?", [toMemberId]);
   if (rows.length === 0) {
     throw new PaymentError(404, "unknown_member", "That member is not in the crew.");
   }
 }
 
 function isDuplicate(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ER_DUP_ENTRY";
+  return isUniqueViolation(error);
 }
 
 async function insertPending(pool: Db, input: StartInput, id: string): Promise<void> {
-  const created = new Date().toISOString().slice(0, 23).replace("T", " ");
+  const created = new Date().toISOString();
   await pool.query(
     `INSERT INTO payments
       (id, member_id, idempotency_key, kind, amount_cents, counterparty_id, phone, status, created_at)
@@ -253,7 +255,7 @@ async function claimPending(pool: Db, id: string): Promise<PaymentRow | null> {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [rows] = await conn.query<Joined[]>(`${SELECT_JOIN} WHERE p.id = ? FOR UPDATE`, [id]);
+    const [rows] = await conn.query<Joined>(`${SELECT_JOIN} WHERE p.id = ? FOR UPDATE`, [id]);
     const row = rows[0];
     if (row === undefined) {
       await conn.commit();
@@ -455,7 +457,7 @@ export async function startLoanPayout(
     throw new PaymentError(422, "bad_amount", "M-Pesa pays out at most KES 250,000.");
   }
   const id = randomBytes(16).toString("hex");
-  const created = new Date().toISOString().slice(0, 23).replace("T", " ");
+  const created = new Date().toISOString();
   await pool.query(
     `INSERT INTO payments
       (id, member_id, idempotency_key, kind, amount_cents, counterparty_id, phone, status, created_at)

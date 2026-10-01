@@ -9,8 +9,26 @@ export type ListedShare = {
 };
 
 const here = dirname(fileURLToPath(import.meta.url));
-const NYSE_SNAPSHOT = join(here, "..", "data", "nyse.json");
-const NSE_SNAPSHOT = join(here, "..", "data", "nse.json");
+
+function snapshotPath(name: string): string {
+  const candidates = [
+    join(here, "..", "data", name),
+    join(process.cwd(), "server", "data", name),
+    join(process.cwd(), "data", name),
+  ];
+  for (const path of candidates) {
+    try {
+      readFileSync(path);
+      return path;
+    } catch {
+      continue;
+    }
+  }
+  return candidates[0] ?? name;
+}
+
+const NYSE_SNAPSHOT = snapshotPath("nyse.json");
+const NSE_SNAPSHOT = snapshotPath("nse.json");
 const NYSE_DIRECTORY = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt";
 const NSE_DIRECTORY = "https://afx.kwayisi.org/nse/";
 const TTL_MS = 12 * 60 * 60 * 1000;

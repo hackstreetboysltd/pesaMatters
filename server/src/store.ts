@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import type { Conn, Db } from "./db.ts";
+import type { Conn, Db, Row } from "./db.ts";
 import {
   GENESIS_PREV,
   blockHash,
@@ -41,7 +40,7 @@ export type PublicBlock = {
   createdAt: string;
 };
 
-type BlockRow = RowDataPacket & {
+type BlockRow = Row & {
   id: number;
   prev_hash: string;
   hash: string;
@@ -72,15 +71,8 @@ function asPayload(value: Payload | string): Payload {
 async function withLedger<T>(pool: Db, fn: (conn: Conn) => Promise<T>): Promise<T> {
   const conn = await pool.getConnection();
   try {
-    const [lockRows] = await conn.query<RowDataPacket[]>(
-      "SELECT GET_LOCK(?, 10) AS got",
-      [LOCK],
-    );
-    const got = lockRows[0]?.["got"];
-    if (got !== 1) {
-      throw new Error("Could not lock the ledger");
-    }
     await conn.beginTransaction();
+    await conn.query("SELECT pg_advisory_xact_lock(hashtext(?))", [LOCK]);
     try {
       const result = await fn(conn);
       await conn.commit();
@@ -90,16 +82,12 @@ async function withLedger<T>(pool: Db, fn: (conn: Conn) => Promise<T>): Promise<
       throw error;
     }
   } finally {
-    try {
-      await conn.query("SELECT RELEASE_LOCK(?)", [LOCK]);
-    } finally {
-      conn.release();
-    }
+    conn.release();
   }
 }
 
 async function tipHash(conn: Conn): Promise<string> {
-  const [rows] = await conn.query<RowDataPacket[]>(
+  const [rows] = await conn.query<Row>(
     "SELECT hash FROM blocks ORDER BY id DESC LIMIT 1 FOR UPDATE",
   );
   const hash = rows[0]?.["hash"];
@@ -116,13 +104,18 @@ async function insertBlock(
   const createdAtIso = createdAt.toISOString();
   const payloadCanonical = canonicalPayload(payload);
   const hash = blockHash(prevHash, entryType, payloadCanonical, createdAtIso);
-  const [result] = await conn.query<ResultSetHeader>(
+  const [rows] = await conn.query<Row>(
     `INSERT INTO blocks (prev_hash, hash, entry_type, payload, created_at_iso, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [prevHash, hash, entryType, JSON.stringify(payload), createdAtIso, createdAtIso.slice(0, 23).replace("T", " ")],
+     VALUES (?, ?, ?, ?::jsonb, ?, ?)
+     RETURNING id`,
+    [prevHash, hash, entryType, JSON.stringify(payload), createdAtIso, createdAtIso],
   );
+  const id = Number(rows[0]?.["id"]);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("Block insert did not return an id");
+  }
   return {
-    id: result.insertId,
+    id,
     prevHash,
     hash,
     entryType,
@@ -133,12 +126,12 @@ async function insertBlock(
 
 async function loadState(conn: Conn): Promise<MoneyState> {
   const state = emptyState();
-  const [treasury] = await conn.query<RowDataPacket[]>(
+  const [treasury] = await conn.query<Row>(
     "SELECT cash_cents FROM treasury WHERE id = 1 FOR UPDATE",
   );
   const cash = treasury[0]?.["cash_cents"];
   state.cashCents = typeof cash === "number" ? cash : Number(cash ?? 0);
-  const [claims] = await conn.query<RowDataPacket[]>(
+  const [claims] = await conn.query<Row>(
     "SELECT member_id, claim_cents FROM claims FOR UPDATE",
   );
   for (const row of claims) {
@@ -148,7 +141,7 @@ async function loadState(conn: Conn): Promise<MoneyState> {
       state.claims[id] = typeof claim === "number" ? claim : Number(claim);
     }
   }
-  const [positions] = await conn.query<RowDataPacket[]>(
+  const [positions] = await conn.query<Row>(
     "SELECT id, symbol, name, units_micro, cost_cents, price_cents FROM investments FOR UPDATE",
   );
   for (const row of positions) {
@@ -168,21 +161,21 @@ async function loadState(conn: Conn): Promise<MoneyState> {
 async function saveState(conn: Conn, state: MoneyState): Promise<void> {
   await conn.query(
     `INSERT INTO treasury (id, cash_cents) VALUES (1, ?)
-     ON DUPLICATE KEY UPDATE cash_cents = VALUES(cash_cents)`,
+     ON CONFLICT (id) DO UPDATE SET cash_cents = EXCLUDED.cash_cents`,
     [state.cashCents],
   );
   for (const [memberId, claimCents] of Object.entries(state.claims)) {
     await conn.query(
       `INSERT INTO claims (member_id, claim_cents) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE claim_cents = VALUES(claim_cents)`,
+       ON CONFLICT (member_id) DO UPDATE SET claim_cents = EXCLUDED.claim_cents`,
       [memberId, claimCents],
     );
   }
   for (const [id, position] of Object.entries(state.positions)) {
     await conn.query(
       `INSERT INTO investments (id, symbol, name, units_micro, cost_cents, price_cents, opened_at)
-       VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3))
-       ON DUPLICATE KEY UPDATE price_cents = VALUES(price_cents)`,
+       VALUES (?, ?, ?, ?, ?, ?, NOW())
+       ON CONFLICT (id) DO UPDATE SET price_cents = EXCLUDED.price_cents`,
       [id, position.symbol, position.name, position.unitsMicro, position.costCents, position.priceCents],
     );
   }
@@ -206,8 +199,7 @@ async function recordClose(conn: Conn, payload: Payload, createdAt: Date): Promi
   const session = sessionOrNull(payload["sessionDate"]);
   const priorClose = centsOrNull(payload["priorCloseCents"]);
   const priorSession = sessionOrNull(payload["priorSession"]);
-  const markedAt =
-    session !== null ? `${session} 12:00:00.000` : createdAt.toISOString().slice(0, 23).replace("T", " ");
+  const markedAt = session !== null ? `${session}T12:00:00.000Z` : createdAt.toISOString();
   await conn.query(
     "INSERT INTO investment_marks (investment_id, price_cents, marked_at, session_date) VALUES (?, ?, ?, ?)",
     [investmentId, price, markedAt, session],
@@ -236,7 +228,7 @@ export async function appendEntry(
       const investmentId = payload["investmentId"];
       if (typeof investmentId === "string") {
         await conn.query("UPDATE investments SET opened_at = ? WHERE id = ?", [
-          createdAt.toISOString().slice(0, 23).replace("T", " "),
+          createdAt.toISOString(),
           investmentId,
         ]);
       }
@@ -250,7 +242,7 @@ export async function appendEntry(
 
 export async function ensureGenesis(pool: Db): Promise<void> {
   await withLedger(pool, async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>("SELECT id FROM blocks LIMIT 1");
+    const [rows] = await conn.query<Row>("SELECT id FROM blocks LIMIT 1");
     if (rows.length > 0) return;
     await conn.query(
       "INSERT INTO treasury (id, cash_cents) VALUES (1, 0)",
@@ -272,7 +264,7 @@ export async function createMember(
     await conn.beginTransaction();
     await conn.query(
       "INSERT INTO members (id, name, email, password_hash, google_sub, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, input.name, input.email, passwordHash, input.googleSub ?? null, createdAt.toISOString().slice(0, 23).replace("T", " ")],
+      [id, input.name, input.email, passwordHash, input.googleSub ?? null, createdAt.toISOString()],
     );
     await conn.query("INSERT INTO claims (member_id, claim_cents) VALUES (?, 0)", [id]);
     await conn.commit();
@@ -317,7 +309,7 @@ export async function memberFromGoogle(
 }
 
 async function findMemberByGoogleSub(pool: Db, sub: string): Promise<Member | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     "SELECT id, name, email, created_at FROM members WHERE google_sub = ? LIMIT 1",
     [sub],
   );
@@ -335,7 +327,7 @@ export async function findMemberByEmail(
   pool: Db,
   email: string,
 ): Promise<(Member & { passwordHash: string; googleSub: string | null }) | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     "SELECT id, name, email, password_hash, google_sub, created_at FROM members WHERE email = ? LIMIT 1",
     [email],
   );
@@ -358,18 +350,18 @@ export async function openSession(pool: Db, memberId: string): Promise<string> {
   const expires = new Date(Date.now() + 1000 * 60 * 60 * 12);
   await pool.query(
     "INSERT INTO sessions (token_hash, member_id, expires_at) VALUES (?, ?, ?)",
-    [tokenHash, memberId, expires.toISOString().slice(0, 23).replace("T", " ")],
+    [tokenHash, memberId, expires.toISOString()],
   );
   return token;
 }
 
 export async function memberFromToken(pool: Db, token: string): Promise<Member | null> {
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     `SELECT m.id, m.name, m.email, m.created_at
      FROM sessions s
      JOIN members m ON m.id = s.member_id
-     WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(3)
+     WHERE s.token_hash = ? AND s.expires_at > NOW()
      LIMIT 1`,
     [tokenHash],
   );
@@ -389,7 +381,7 @@ export async function closeSession(pool: Db, token: string): Promise<void> {
 }
 
 export async function listMembers(pool: Db): Promise<Member[]> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     "SELECT id, name, email, created_at FROM members ORDER BY name ASC",
   );
   return rows.map((row) => ({
@@ -401,7 +393,7 @@ export async function listMembers(pool: Db): Promise<Member[]> {
 }
 
 async function readBlocks(connOrPool: Db | Conn): Promise<ChainBlock[]> {
-  const [rows] = await connOrPool.query<BlockRow[]>(
+  const [rows] = await connOrPool.query<BlockRow>(
     "SELECT id, prev_hash, hash, entry_type, payload, created_at_iso FROM blocks ORDER BY id ASC",
   );
   return rows.map((row) => ({
@@ -414,7 +406,7 @@ async function readBlocks(connOrPool: Db | Conn): Promise<ChainBlock[]> {
 }
 
 export async function listBlocks(pool: Db): Promise<PublicBlock[]> {
-  const [rows] = await pool.query<BlockRow[]>(
+  const [rows] = await pool.query<BlockRow>(
     "SELECT id, prev_hash, hash, entry_type, payload, created_at_iso FROM blocks ORDER BY id ASC",
   );
   return rows.map((row) => ({
@@ -432,11 +424,11 @@ export async function verifyStoredChain(pool: Db): Promise<{ ok: true; length: n
   const check = verifyChain(blocks);
   if (!check.ok) return check;
   let state = emptyState();
-  const [memberRows] = await pool.query<RowDataPacket[]>("SELECT id FROM members");
+  const [memberRows] = await pool.query<Row>("SELECT id FROM members");
   for (const row of memberRows) {
     state.claims[String(row["id"])] = 0;
   }
-  const [blockRows] = await pool.query<BlockRow[]>(
+  const [blockRows] = await pool.query<BlockRow>(
     "SELECT id, prev_hash, hash, entry_type, payload, created_at_iso FROM blocks ORDER BY id ASC",
   );
   for (const row of blockRows) {
@@ -601,7 +593,7 @@ export type InvestmentView = {
 };
 
 export async function listInvestments(pool: Db): Promise<InvestmentView[]> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     `SELECT id, symbol, name, units_micro, cost_cents, price_cents, opened_at,
             prior_close_cents, close_session, prior_session
      FROM investments ORDER BY opened_at ASC`,
@@ -610,7 +602,7 @@ export async function listInvestments(pool: Db): Promise<InvestmentView[]> {
 }
 
 export async function getInvestment(pool: Db, id: string): Promise<(InvestmentView & { marks: { at: string; priceCents: number }[] }) | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     `SELECT id, symbol, name, units_micro, cost_cents, price_cents, opened_at,
             prior_close_cents, close_session, prior_session
      FROM investments WHERE id = ? LIMIT 1`,
@@ -618,7 +610,7 @@ export async function getInvestment(pool: Db, id: string): Promise<(InvestmentVi
   );
   const row = rows[0];
   if (row === undefined) return null;
-  const [marks] = await pool.query<RowDataPacket[]>(
+  const [marks] = await pool.query<Row>(
     "SELECT price_cents, marked_at FROM investment_marks WHERE investment_id = ? ORDER BY id ASC",
     [id],
   );
@@ -631,7 +623,7 @@ export async function getInvestment(pool: Db, id: string): Promise<(InvestmentVi
   };
 }
 
-function mapInvestment(row: RowDataPacket): InvestmentView {
+function mapInvestment(row: Row): InvestmentView {
   const position: Position = {
     symbol: String(row["symbol"]),
     name: String(row["name"]),
@@ -676,7 +668,7 @@ function dayMove(priorCents: number | null, latestCents: number): number | null 
 }
 
 export async function seedCrew(pool: Db, password: string): Promise<void> {
-  const [existing] = await pool.query<RowDataPacket[]>("SELECT id FROM members LIMIT 1");
+  const [existing] = await pool.query<Row>("SELECT id FROM members LIMIT 1");
   if (existing.length > 0) return;
   const crew = [
     { name: "Kakai", email: "kakai@hackstreet.local" },

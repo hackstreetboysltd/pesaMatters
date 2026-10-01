@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start Hackstreet PesaMatters locally: free required ports, bring up MariaDB +
+# Start Hackstreet PesaMatters locally: free required ports, bring up Postgres +
 # API + Vite, wait until ready, open the app in the browser.
 #
 # Dependencies: bash, docker, npm, curl, ss (iproute2), xdg-open (or open / sensible-browser)
@@ -106,7 +106,7 @@ db_container_running() {
 }
 
 main() {
-  local root api_port mysql_port client_port app_origin
+  local root api_port postgres_port client_port app_origin
   local server_pid="" client_pid=""
 
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -121,23 +121,25 @@ main() {
   [[ -d node_modules ]] || die "Missing node_modules — run: npm install"
 
   api_port="$(env_value PORT 8787 .env)"
-  mysql_port="$(env_value MYSQL_PORT 3310 .env)"
+  postgres_port="$(env_value POSTGRES_PORT 5432 .env)"
   app_origin="$(env_value APP_ORIGIN http://127.0.0.1:5173 .env)"
-  # Vite port is fixed in client/vite.config.ts; keep in lockstep with APP_ORIGIN.
   client_port=5173
 
   log "Freeing app ports..."
   free_port "$client_port" "Vite"
   free_port "$api_port" "API"
 
-  # Leave MariaDB alone when our compose service already owns the port.
   if db_container_running; then
-    log "MariaDB container already running on port ${mysql_port}."
+    log "Postgres container already running on port ${postgres_port}."
   else
-    free_port "$mysql_port" "MariaDB"
-    log "Starting MariaDB..."
+    free_port "$postgres_port" "Postgres"
+    log "Starting Postgres..."
     docker compose up -d --wait
   fi
+
+  log "Applying schema and seed (idempotent)..."
+  npm run db:migrate
+  npm run db:seed
 
   trap '
     if [[ -n "${server_pid:-}" ]] && kill -0 "$server_pid" 2>/dev/null; then
@@ -162,7 +164,6 @@ main() {
   open_browser "${app_origin}/"
 
   log "Stack is up. Press Ctrl+C to stop."
-  # Exit when either child dies; cleanup trap stops the other.
   wait -n "$server_pid" "$client_pid"
   exit $?
 }

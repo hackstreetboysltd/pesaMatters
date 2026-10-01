@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { RowDataPacket } from "mysql2";
-import type { Conn, Db } from "../db.ts";
+import type { Conn, Db, Row } from "../db.ts";
 import type { Rails } from "../mpesa/client.ts";
 import { completeLoanOut, PaymentError, startLoanPayout } from "../payments.ts";
 import { hashPassword, verifyPassword } from "../passwords.ts";
@@ -82,7 +81,7 @@ export type IncomingGuarantee = {
   productName: string;
 };
 
-type AppRow = RowDataPacket & {
+type AppRow = Row & {
   id: string;
   member_id: string;
   member_name: string;
@@ -102,7 +101,16 @@ type AppRow = RowDataPacket & {
 };
 
 function stamp(date = new Date()): string {
-  return date.toISOString().slice(0, 23).replace("T", " ");
+  return date.toISOString();
+}
+
+function toIsoStamp(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") {
+    if (value.endsWith("Z") || value.includes("T")) return new Date(value).toISOString();
+    return new Date(`${value.replace(" ", "T")}Z`).toISOString();
+  }
+  return new Date(Number(value)).toISOString();
 }
 
 function cents(value: unknown): number {
@@ -141,17 +149,17 @@ export async function seedLoanProducts(pool: Db): Promise<void> {
         (code, name, interest_percent, term_min, term_max, term_unit, minimum_cents, maximum_cents,
          minimum_guarantors, coverage_percent, fee_percent)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         name = VALUES(name),
-         interest_percent = VALUES(interest_percent),
-         term_min = VALUES(term_min),
-         term_max = VALUES(term_max),
-         term_unit = VALUES(term_unit),
-         minimum_cents = VALUES(minimum_cents),
-         maximum_cents = VALUES(maximum_cents),
-         minimum_guarantors = VALUES(minimum_guarantors),
-         coverage_percent = VALUES(coverage_percent),
-         fee_percent = VALUES(fee_percent)`,
+       ON CONFLICT (code) DO UPDATE SET
+         name = EXCLUDED.name,
+         interest_percent = EXCLUDED.interest_percent,
+         term_min = EXCLUDED.term_min,
+         term_max = EXCLUDED.term_max,
+         term_unit = EXCLUDED.term_unit,
+         minimum_cents = EXCLUDED.minimum_cents,
+         maximum_cents = EXCLUDED.maximum_cents,
+         minimum_guarantors = EXCLUDED.minimum_guarantors,
+         coverage_percent = EXCLUDED.coverage_percent,
+         fee_percent = EXCLUDED.fee_percent`,
       [
         product.code,
         product.name,
@@ -171,7 +179,7 @@ export async function seedLoanProducts(pool: Db): Promise<void> {
 
 export async function ensureDeskAdmin(pool: Db, email: string | null, password: string | null): Promise<void> {
   if (email === null || password === null) return;
-  const [existing] = await pool.query<RowDataPacket[]>("SELECT id FROM admins LIMIT 1");
+  const [existing] = await pool.query<Row>("SELECT id FROM admins LIMIT 1");
   if (existing.length > 0) return;
   const id = randomBytes(16).toString("hex");
   const local = email.split("@")[0] ?? "Desk";
@@ -183,7 +191,7 @@ export async function ensureDeskAdmin(pool: Db, email: string | null, password: 
 }
 
 export async function openDeskSession(pool: Db, email: string, password: string): Promise<{ token: string; admin: { id: string; name: string; email: string } } | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
     [email],
   );
@@ -207,11 +215,11 @@ export async function openDeskSession(pool: Db, email: string, password: string)
 
 export async function adminFromToken(pool: Db, token: string): Promise<{ id: string; name: string; email: string } | null> {
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     `SELECT a.id, a.name, a.email
      FROM desk_sessions s
      JOIN admins a ON a.id = s.admin_id
-     WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(3)
+     WHERE s.token_hash = ? AND s.expires_at > NOW()
      LIMIT 1`,
     [tokenHash],
   );
@@ -226,7 +234,7 @@ export async function closeDeskSession(pool: Db, token: string): Promise<void> {
 }
 
 async function depositsOf(conn: Conn | Db, memberId: string, lock: boolean): Promise<number> {
-  const [rows] = await conn.query<RowDataPacket[]>(
+  const [rows] = await conn.query<Row>(
     `SELECT claim_cents FROM claims WHERE member_id = ?${lock ? " FOR UPDATE" : ""}`,
     [memberId],
   );
@@ -234,7 +242,7 @@ async function depositsOf(conn: Conn | Db, memberId: string, lock: boolean): Pro
 }
 
 async function outstandingOf(conn: Conn | Db, memberId: string): Promise<number> {
-  const [rows] = await conn.query<RowDataPacket[]>(
+  const [rows] = await conn.query<Row>(
     "SELECT COALESCE(SUM(principal_cents), 0) AS total FROM loans WHERE member_id = ? AND status IN ('pending', 'active')",
     [memberId],
   );
@@ -242,7 +250,7 @@ async function outstandingOf(conn: Conn | Db, memberId: string): Promise<number>
 }
 
 async function pledgedOf(conn: Conn | Db, memberId: string, exceptGuarantorId: string | null): Promise<number> {
-  const [rows] = await conn.query<RowDataPacket[]>(
+  const [rows] = await conn.query<Row>(
     `SELECT COALESCE(SUM(g.amount_cents), 0) AS total
      FROM loan_guarantors g
      JOIN loan_applications a ON a.id = g.application_id
@@ -287,7 +295,7 @@ function requiredCover(_product: LoanProduct, requestedCents: number): number {
 }
 
 async function loadGuarantors(conn: Conn | Db, applicationId: string): Promise<GuarantorView[]> {
-  const [rows] = await conn.query<RowDataPacket[]>(
+  const [rows] = await conn.query<Row>(
     `SELECT g.id, g.member_id, g.amount_cents, g.status, m.name
      FROM loan_guarantors g
      JOIN members m ON m.id = g.member_id
@@ -305,7 +313,7 @@ async function loadGuarantors(conn: Conn | Db, applicationId: string): Promise<G
 }
 
 async function loadLoan(conn: Conn | Db, applicationId: string): Promise<LoanView | null> {
-  const [rows] = await conn.query<RowDataPacket[]>(
+  const [rows] = await conn.query<Row>(
     "SELECT status, principal_cents, fee_cents, net_cents FROM loans WHERE application_id = ? LIMIT 1",
     [applicationId],
   );
@@ -339,7 +347,7 @@ function coverageOf(product: LoanProduct, requestedCents: number, guarantors: Gu
 }
 
 async function viewOf(conn: Conn | Db, id: string): Promise<ApplicationView> {
-  const [rows] = await conn.query<AppRow[]>(
+  const [rows] = await conn.query<AppRow>(
     `SELECT a.id, a.member_id, m.name AS member_name, a.product_code, a.amount_cents, a.term_count,
             a.purpose, a.phone, a.status, a.recommended_cents, a.approved_cents, a.approved_term,
             a.risk_rating, a.appraisal_notes, a.decision_notes, a.created_at
@@ -373,7 +381,7 @@ async function viewOf(conn: Conn | Db, id: string): Promise<ApplicationView> {
     riskRating: text(row.risk_rating),
     appraisalNotes: text(row.appraisal_notes),
     decisionNotes: text(row.decision_notes),
-    createdAt: String(row.created_at),
+    createdAt: toIsoStamp(row.created_at),
     guarantors,
     coverage: coverageOf(product, amount, guarantors),
     loan: await loadLoan(conn, row.id),
@@ -391,12 +399,12 @@ export async function mine(pool: Db, memberId: string): Promise<{
   incoming: IncomingGuarantee[];
 }> {
   const capacity = await capacityFor(pool, memberId);
-  const [latest] = await pool.query<RowDataPacket[]>(
+  const [latest] = await pool.query<Row>(
     "SELECT id FROM loan_applications WHERE member_id = ? ORDER BY created_at DESC LIMIT 1",
     [memberId],
   );
   const application = latest[0] === undefined ? null : await viewOf(pool, String(latest[0]["id"]));
-  const [incomingRows] = await pool.query<RowDataPacket[]>(
+  const [incomingRows] = await pool.query<Row>(
     `SELECT g.id, g.application_id, g.amount_cents, m.name AS borrower_name, a.product_code
      FROM loan_guarantors g
      JOIN loan_applications a ON a.id = g.application_id
@@ -419,10 +427,10 @@ export async function searchMembers(pool: Db, memberId: string, query: string): 
   const needle = query.trim();
   if (needle.length > 80) return [];
   const like = needle.length === 0 ? null : `%${needle.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     like === null
       ? "SELECT id, name FROM members WHERE id <> ? ORDER BY name LIMIT 50"
-      : "SELECT id, name FROM members WHERE id <> ? AND name LIKE ? ESCAPE '\\\\' ORDER BY name LIMIT 50",
+      : "SELECT id, name FROM members WHERE id <> ? AND name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 50",
     like === null ? [memberId] : [memberId, like],
   );
   const found: { id: string; name: string; freeCents: number }[] = [];
@@ -490,7 +498,7 @@ export async function createApplication(
   if (mismatch === "over") throw new LoanError(422, "need_cover", "Guarantees are more than the loan.");
 
   const id = await withTx(pool, async (conn) => {
-    const [open] = await conn.query<RowDataPacket[]>(
+    const [open] = await conn.query<Row>(
       `SELECT id FROM loan_applications WHERE member_id = ? AND status IN (${OPEN_STATUSES.map(() => "?").join(", ")}) LIMIT 1 FOR UPDATE`,
       [memberId, ...OPEN_STATUSES],
     );
@@ -499,7 +507,7 @@ export async function createApplication(
     assertBorrow(input.amountCents, borrower.freeCents, product);
     const ordered = [...input.guarantors].sort((a, b) => a.memberId.localeCompare(b.memberId));
     for (const invite of ordered) {
-      const [who] = await conn.query<RowDataPacket[]>("SELECT id FROM members WHERE id = ? LIMIT 1", [invite.memberId]);
+      const [who] = await conn.query<Row>("SELECT id FROM members WHERE id = ? LIMIT 1", [invite.memberId]);
       if (who.length === 0) throw new LoanError(422, "unknown_member", "That member is not in the crew.");
       const theirs = await capacityLocked(conn, invite.memberId, null);
       const reason = refuseGuarantee({
@@ -551,7 +559,7 @@ export async function inviteGuarantor(
   invite: Invite,
 ): Promise<ApplicationView> {
   await withTx(pool, async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>(
+    const [rows] = await conn.query<Row>(
       "SELECT id, member_id, product_code, amount_cents, status FROM loan_applications WHERE id = ? FOR UPDATE",
       [applicationId],
     );
@@ -562,12 +570,12 @@ export async function inviteGuarantor(
     if (String(row["status"]) !== "awaiting_guarantors") {
       throw new LoanError(409, "not_ready", "Guarantors can be asked while the loan is waiting on them.");
     }
-    const [dup] = await conn.query<RowDataPacket[]>(
+    const [dup] = await conn.query<Row>(
       "SELECT id FROM loan_guarantors WHERE application_id = ? AND member_id = ? AND status IN ('invited', 'accepted') LIMIT 1",
       [applicationId, invite.memberId],
     );
     if (dup.length > 0) throw new LoanError(409, "duplicate_guarantor", "That member is already on this loan.");
-    const [who] = await conn.query<RowDataPacket[]>("SELECT id FROM members WHERE id = ? LIMIT 1", [invite.memberId]);
+    const [who] = await conn.query<Row>("SELECT id FROM members WHERE id = ? LIMIT 1", [invite.memberId]);
     if (who.length === 0) throw new LoanError(422, "unknown_member", "That member is not in the crew.");
     const theirs = await capacityLocked(conn, invite.memberId, null);
     const reason = refuseGuarantee({
@@ -578,7 +586,7 @@ export async function inviteGuarantor(
     });
     if (reason !== null) throw new LoanError(422, reason, GUARANTEE[reason] ?? "That guarantee does not fit.");
     if (invite.amountCents % 100 !== 0) throw new LoanError(422, "bad_amount", "Guarantees are in whole shillings.");
-    const [held] = await conn.query<RowDataPacket[]>(
+    const [held] = await conn.query<Row>(
       "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM loan_guarantors WHERE application_id = ? AND status IN ('invited', 'accepted')",
       [applicationId],
     );
@@ -612,7 +620,7 @@ export async function respondToGuarantee(
   accept: boolean,
 ): Promise<void> {
   await withTx(pool, async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>(
+    const [rows] = await conn.query<Row>(
       "SELECT id, application_id, member_id, amount_cents, status FROM loan_guarantors WHERE id = ? FOR UPDATE",
       [guarantorId],
     );
@@ -638,7 +646,7 @@ export async function respondToGuarantee(
 }
 
 export async function listQueue(pool: Db): Promise<ApplicationView[]> {
-  const [rows] = await pool.query<RowDataPacket[]>(
+  const [rows] = await pool.query<Row>(
     `SELECT id FROM loan_applications
      WHERE status NOT IN ('rejected', 'cancelled', 'disbursed')
      ORDER BY created_at ASC
@@ -655,7 +663,7 @@ export async function appraise(
   input: { recommendedCents: number; notes: string; riskRating: "low" | "medium" | "high" | null },
 ): Promise<ApplicationView> {
   await withTx(pool, async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>(
+    const [rows] = await conn.query<Row>(
       "SELECT id, amount_cents, status FROM loan_applications WHERE id = ? FOR UPDATE",
       [applicationId],
     );
@@ -688,7 +696,7 @@ export async function decide(
   input: { decision: "approve" | "reject"; amountCents: number | null; termCount: number | null; notes: string },
 ): Promise<ApplicationView> {
   await withTx(pool, async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>(
+    const [rows] = await conn.query<Row>(
       "SELECT * FROM loan_applications WHERE id = ? FOR UPDATE",
       [applicationId],
     );
@@ -751,7 +759,7 @@ export async function disburse(pool: Db, rails: Rails, applicationId: string): P
   }
   if (ready.loan?.status === "pending" && ready.loan !== null) {
     if (rails.mode === "mock") {
-      const [pay] = await pool.query<RowDataPacket[]>("SELECT payment_id FROM loans WHERE application_id = ? LIMIT 1", [applicationId]);
+      const [pay] = await pool.query<Row>("SELECT payment_id FROM loans WHERE application_id = ? LIMIT 1", [applicationId]);
       const paymentId = pay[0]?.["payment_id"];
       if (typeof paymentId === "string") await completeLoanOut(pool, paymentId);
     }

@@ -2,6 +2,11 @@
 
 ## 2026-10-01
 
+### Changed
+
+- Local and production books moved from MariaDB to **Postgres** (`pg`). Docker Compose runs Postgres 16 on port **5433**. Schema is applied with `npm run db:migrate`; seed with `npm run db:seed` (no longer on every API boot).
+- Production target is **Vercel** (SPA + serverless Express), **Neon** (pooled `DATABASE_URL`), and **Upstash Redis** (Google sign-in rate limit). Closes run on Vercel Cron at 00:01 Africa/Nairobi.
+
 ### Added
 
 - You shows notifications ten at a time, with the same previous / next control as the ledger.
@@ -49,7 +54,7 @@
 
 ### Added
 
-- `./start.sh` frees the Vite, API, and (when needed) MariaDB ports, starts the local stack, waits until healthy, and opens the app in the browser.
-- Hackstreet PesaMatters: a React and Express crew pot on MariaDB, with a hash-linked ledger for deposits, withdrawals, member transfers, and investment marks.
+- `./start.sh` frees the Vite, API, and (when needed) Postgres ports, starts the local stack, waits until healthy, and opens the app in the browser.
+- Hackstreet PesaMatters: a React and Express crew pot on Postgres, with a hash-linked ledger for deposits, withdrawals, member transfers, and investment marks.
 - Phone-first pot screen, move, investments with a price path, a full ledger, and a profile with per-device System / Light / Dark.
 - Sandbox Kingdom Securities labeling. Broker credentials are not collected or stored.

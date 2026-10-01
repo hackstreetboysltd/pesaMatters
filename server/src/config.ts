@@ -26,6 +26,9 @@ const Env = z.object({
   MPESA_B2C_TIMEOUT_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
   DESK_EMAIL: z.preprocess(emptyAsUnset, z.string().trim().email().max(254).optional()),
   DESK_PASSWORD: z.preprocess(emptyAsUnset, z.string().min(10).max(200).optional()),
+  UPSTASH_REDIS_REST_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
+  UPSTASH_REDIS_REST_TOKEN: z.preprocess(emptyAsUnset, z.string().min(8).max(500).optional()),
+  CRON_SECRET: z.preprocess(emptyAsUnset, z.string().min(16).max(200).optional()),
 });
 
 export type GoogleConfig = {
@@ -62,6 +65,9 @@ export type AppConfig = {
   mpesa: MpesaConfig;
   deskEmail: string | null;
   deskPassword: string | null;
+  upstashUrl: string | null;
+  upstashToken: string | null;
+  cronSecret: string | null;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -81,6 +87,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if ((deskEmail === null) !== (deskPassword === null)) {
     throw new Error("Invalid configuration: DESK_EMAIL");
   }
+  const upstashUrl = parsed.data.UPSTASH_REDIS_REST_URL ?? null;
+  const upstashToken = parsed.data.UPSTASH_REDIS_REST_TOKEN ?? null;
+  if ((upstashUrl === null) !== (upstashToken === null)) {
+    throw new Error("Invalid configuration: UPSTASH_REDIS_REST_URL");
+  }
   return {
     databaseUrl: parsed.data.DATABASE_URL,
     seedPassword: parsed.data.SEED_PASSWORD,
@@ -91,6 +102,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     mpesa: mpesaFrom(parsed.data),
     deskEmail,
     deskPassword,
+    upstashUrl,
+    upstashToken,
+    cronSecret: parsed.data.CRON_SECRET ?? null,
   };
 }
 

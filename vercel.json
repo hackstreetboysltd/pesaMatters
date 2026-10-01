@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": "client/dist",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/desk", "destination": "/desk.html" },
+    { "source": "/desk/(.*)", "destination": "/desk.html" },
+    { "source": "/((?!api/|desk\\.html|assets/|.*\\..*).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/closes",
+      "schedule": "1 21 * * *"
+    }
+  ],
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60,
+      "includeFiles": "server/data/**"
+    }
+  }
+}

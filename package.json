@@ -1,11 +1,28 @@
 {
   "name": "hackstreet-pesamatters",
   "private": true,
-  "workspaces": ["server", "client"],
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "bash scripts/dev.sh",
+    "build": "npm run build -w hackstreet-client && node scripts/build-api.mjs",
     "test": "npm run test -w hackstreet-server && npm run test -w hackstreet-client",
     "typecheck": "npm run typecheck -w hackstreet-server && npm run typecheck -w hackstreet-client",
-    "db": "docker compose up -d"
+    "db": "docker compose up -d",
+    "db:migrate": "npm run db:migrate -w hackstreet-server",
+    "db:seed": "npm run db:seed -w hackstreet-server"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.4"
+  },
+  "dependencies": {
+    "@upstash/ratelimit": "^2.0.5",
+    "@upstash/redis": "^1.34.9",
+    "dotenv": "16.6.1",
+    "express": "^4.22.3",
+    "pg": "^8.14.1",
+    "zod": "3.25.76"
   }
 }

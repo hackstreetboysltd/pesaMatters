@@ -5,8 +5,11 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 if ! docker compose ps --status running --services 2>/dev/null | grep -qx db; then
-  docker compose up -d
+  docker compose up -d --wait
 fi
+
+npm run db:migrate
+npm run db:seed
 
 cleanup() {
   if [[ -n "${server_pid:-}" ]]; then kill "$server_pid" 2>/dev/null || true; fi

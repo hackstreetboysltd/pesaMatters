@@ -1,14 +1,15 @@
 # Hackstreet PesaMatters
 
-Last updated: 2026-10-01 03:34 PM CDT
+Last updated: 2026-10-01
 
-A phone-first pot for one investment crew. Each member sees the money they can move, their slice of the whole pot, and a hash-linked ledger of deposits, withdrawals, transfers, and investment marks. The books are MySQL. The UI is React. The API is Express.
+A phone-first pot for one investment crew. Each member sees the money they can move, their slice of the whole pot, and a hash-linked ledger of deposits, withdrawals, transfers, and investment marks. The books are **Postgres**. The UI is React. The API is Express.
 
-This is a **Tier 1** app: real-shaped auth and a ledger you can check, running against a local database. It does not place live Kingdom Securities orders.
+This is a **Tier 1** app: real-shaped auth and a ledger you can check. It does not place live Kingdom Securities orders.
 
 ## Contents
 
 - [Run it](#run-it)
+- [Deploy (Vercel + Neon + Upstash)](#deploy-vercel--neon--upstash)
 - [Crew accounts](#crew-accounts)
 - [Sessions](#sessions)
 - [What you can do](#what-you-can-do)
@@ -28,16 +29,88 @@ Prerequisites: Node 22, Docker, npm.
 
 ```bash
 cp .env.example .env
-# put long random values in MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD, and SEED_PASSWORD
+# put long random values in POSTGRES_PASSWORD and SEED_PASSWORD
 npm install
 ./start.sh
 ```
 
-`./start.sh` frees ports **5173** (Vite), **8787** (API), and **3310** (MariaDB, only when the compose DB is not already running), starts MariaDB + the API + Vite, waits until they answer, then opens http://127.0.0.1:5173 in your browser. Press Ctrl+C in that terminal to stop the API and Vite.
+`./start.sh` frees ports **5173** (Vite), **8787** (API), and **5433** (Postgres, only when the compose DB is not already running), starts Postgres, runs `npm run db:migrate` and `npm run db:seed`, starts the API + Vite, waits until they answer, then opens http://127.0.0.1:5173 in your browser. Press Ctrl+C in that terminal to stop the API and Vite.
 
-You can still use `npm run dev` if you only want the stack without freeing ports or opening a browser. The API is http://127.0.0.1:8787. MariaDB is published on port 3310.
+You can still use `npm run dev` if you only want the stack without freeing ports or opening a browser. The API is http://127.0.0.1:8787. Postgres is published on port **5433** by default.
 
-## Crew accounts
+Schema and seed are **not** applied on every API boot. Apply them explicitly:
+
+```bash
+npm run db:migrate
+npm run db:seed
+```
+
+## Deploy (Vercel + Neon + Upstash)
+
+Production hosts the Vite SPA and the Express API on **Vercel**, the ledger on **Neon Postgres**, and sign-in rate limits on **Upstash Redis**. Daily closes run via **Vercel Cron** at 00:01 Africa/Nairobi (`1 21 * * *` UTC).
+
+### 1. Neon
+
+1. Create a project at [console.neon.tech](https://console.neon.tech).
+2. Copy the **pooled** connection string (`…-pooler…` host) as `DATABASE_URL`.
+3. From this repo (with that URL in your shell or a temporary `.env`):
+
+```bash
+DATABASE_URL='postgres://…' npm run db:migrate
+DATABASE_URL='postgres://…' SEED_PASSWORD='…' APP_ORIGIN='https://placeholder.vercel.app' COOKIE_SECURE=true npm run db:seed
+```
+
+(Use a real `SEED_PASSWORD` ≥ 10 chars. Set `DESK_EMAIL` / `DESK_PASSWORD` in the environment before seed if you want a desk admin.)
+
+### 2. Upstash
+
+1. Create a Redis database at [console.upstash.com](https://console.upstash.com).
+2. Copy `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+
+### 3. Vercel
+
+1. Import `hackstreetboysltd/pesaMatters` from GitHub.
+2. Framework preset: **Other**. Build command `npm run build`. Output directory `client/dist`.
+3. Set environment variables (Production):
+
+| Name | Notes |
+|------|--------|
+| `DATABASE_URL` | Neon **pooled** URL |
+| `SEED_PASSWORD` | Required by config; seeding is CLI-only |
+| `APP_ORIGIN` | `https://your-app.vercel.app` (update after first deploy if needed) |
+| `COOKIE_SECURE` | `true` |
+| `PORT` | unused on Vercel; set `8787` if the schema requires it |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | from Upstash |
+| `CRON_SECRET` | long random string (Vercel Cron sends `Authorization: Bearer …`) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | production OAuth client |
+| `MPESA_MODE` | start with `mock` |
+| `DESK_EMAIL` / `DESK_PASSWORD` | optional; only used when you re-run seed |
+
+4. Deploy. Note the production URL. If `APP_ORIGIN` was a placeholder, set it to the real HTTPS origin and redeploy.
+
+### 4. Google OAuth
+
+In Google Cloud, add authorized redirect URI:
+
+`https://<your-host>/api/auth/google/callback`
+
+Keep the local URI (`http://127.0.0.1:5173/api/auth/google/callback`) for development.
+
+### 5. Smoke test
+
+Open the production URL → Continue with Google → Move (mock Add) → Invest quote → Desk at `/desk` if seeded.
+
+### 6. Live M-Pesa (later)
+
+Point Daraja callbacks at:
+
+- `https://<your-host>/api/payments/mpesa/stk`
+- `https://<your-host>/api/payments/mpesa/b2c`
+- `https://<your-host>/api/payments/mpesa/b2c-timeout`
+
+and set the `MPESA_*` live variables.
+
+
 
 Sign-in is **Continue with Google**. The browser goes to Google, then back to this app. A verified Google email that is already in the crew signs into that member. A new verified email joins the crew.
 
@@ -159,7 +232,7 @@ Phone, Kiln, After hours, Coast, Fare, and Brew are saved in this browser only (
 - Request bodies are checked with Zod before they touch the ledger.
 - `.env` is gitignored.
 
-`npm audit` was clean after pinning Express 4.22.3, mysql2 3.24.5, React Router 7.18.4, and Vite 6.4.3.
+`npm audit` was clean after pinning Express 4.22.3, pg 8.14.1, React Router 7.18.4, and Vite 6.4.3.
 
 <sub>[↑ Back to contents](#contents)</sub>
 
@@ -177,8 +250,8 @@ The tests cover hash linking, a tampered block, transfers, withdrawals that the 
 - One crew. There is no tenant isolation beyond “you must be signed in.”
 - Any signed-in member can record a sandbox buy. The close comes from the free NSE pages, not from a typed price. There is no second-person approval yet.
 - Those pages are an unofficial public site. If the page shape changes, lookups fail closed and the last stored close stays. This is not a broker and not a live price.
-- Schema changes are `CREATE TABLE IF NOT EXISTS` on boot, not versioned migrations.
-- The database volume `pesamatters-db` is the local copy of the books. Dump it with `docker compose exec db mariadb-dump -upesamatters -p pesamatters` before you treat it as a backup. A restore drill has not been run.
+- Schema changes are applied with `npm run db:migrate`, not on every API boot.
+- The database volume `pesamatters-pg` is the local copy of the books. Dump it with `docker compose exec db pg_dump -U pesamatters pesamatters` before you treat it as a backup. A restore drill has not been run.
 - M-Pesa mock mode does not move real money. Live mode needs a public https callback Safaricom can reach. Refunds are not built.
 - Automated accessibility checks (axe) are not in CI yet.
 - The Mermaid diagrams above were checked by hand (fences, `flowchart`, node ids). A Mermaid renderer was not run.
@@ -188,8 +261,8 @@ The tests cover hash linking, a tampered block, transfers, withdrawals that the 
 - **Continue with Google says it needs a client id and secret.** Put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` and restart the API. The redirect URI in Google Cloud must be `http://127.0.0.1:5173/api/auth/google/callback`.
 - **Google sends you back and sign-in does not finish.** Stay in the same tab you started from, at `http://127.0.0.1:5173` (the same origin as `APP_ORIGIN`). The sign-in attempt lives in that tab, not in a cookie. The redirect URI in Google Cloud must still be `http://127.0.0.1:5173/api/auth/google/callback`.
 - **You land on home without signing in.** Hard-refresh. Unauthenticated document loads should 302 to `/login`. If Vite was started before this gate landed, restart `./start.sh`.
-- **The API never becomes ready.** Check `docker compose ps`. The database must be healthy on port 3310, and `DATABASE_URL` must use the same password as `MYSQL_PASSWORD`.
+- **The API never becomes ready.** Check `docker compose ps`. The database must be healthy on port 5433 (or `POSTGRES_PORT`), and `DATABASE_URL` must use the same password as `POSTGRES_PASSWORD`. Run `npm run db:migrate` once against a fresh volume.
 - **Port 5173 or 8787 is taken.** Run `./start.sh` — it stops whatever is holding those ports before starting. Or change `PORT` and the Vite port together. The Vite dev server proxies `/api` to 8787.
-- **M-Pesa says it did not accept the request.** With `MPESA_MODE=mock`, restart the API so the payments table exists. For live mode, the callback URL has to be https and the consumer key has to belong to this app. Out stays unavailable until the B2C variables are set.
+- **M-Pesa says it did not accept the request.** With `MPESA_MODE=mock`, restart the API so the payments table exists (`npm run db:migrate`). For live mode, the callback URL has to be https and the consumer key has to belong to this app. Out stays unavailable until the B2C variables are set.
 
 <sub>[↑ Back to contents](#contents)</sub>
