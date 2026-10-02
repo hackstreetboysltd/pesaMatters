@@ -250,8 +250,7 @@ async function outstandingOf(conn: Conn | Db, memberId: string): Promise<number>
 }
 
 async function pledgedOf(conn: Conn | Db, memberId: string, exceptGuarantorId: string | null): Promise<number> {
-  const [rows] = await conn.query<Row>(
-    `SELECT COALESCE(SUM(g.amount_cents), 0) AS total
+  const base = `SELECT COALESCE(SUM(g.amount_cents), 0) AS total
      FROM loan_guarantors g
      JOIN loan_applications a ON a.id = g.application_id
      LEFT JOIN loans l ON l.application_id = a.id
@@ -259,10 +258,11 @@ async function pledgedOf(conn: Conn | Db, memberId: string, exceptGuarantorId: s
        AND g.status IN ('invited', 'accepted')
        AND a.status NOT IN ('rejected', 'cancelled')
        AND (l.id IS NULL OR l.status IN ('pending', 'active'))
-       AND g.member_id <> a.member_id
-       AND (? IS NULL OR g.id <> ?)`,
-    [memberId, exceptGuarantorId, exceptGuarantorId],
-  );
+       AND g.member_id <> a.member_id`;
+  const [rows] =
+    exceptGuarantorId === null
+      ? await conn.query<Row>(base, [memberId])
+      : await conn.query<Row>(`${base} AND g.id <> ?`, [memberId, exceptGuarantorId]);
   return cents(rows[0]?.["total"]);
 }
 
