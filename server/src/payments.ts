@@ -255,7 +255,7 @@ async function claimPending(pool: Db, id: string): Promise<PaymentRow | null> {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [rows] = await conn.query<Joined>(`${SELECT_JOIN} WHERE p.id = ? FOR UPDATE`, [id]);
+    const [rows] = await conn.query<Joined>(`${SELECT_JOIN} WHERE p.id = ? FOR UPDATE OF p`, [id]);
     const row = rows[0];
     if (row === undefined) {
       await conn.commit();

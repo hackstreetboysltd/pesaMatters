@@ -25,12 +25,20 @@ export function toPg(sql: string): string {
   });
 }
 
+function normalizeDatabaseUrl(databaseUrl: string): string {
+  // node-pg does not honor Neon's channel_binding flag and it can break auth.
+  return databaseUrl
+    .replace(/([?&])channel_binding=require&?/g, "$1")
+    .replace(/[?&]$/, "")
+    .replace(/\?&/, "?");
+}
+
 function sslOption(databaseUrl: string): boolean | { rejectUnauthorized: boolean } | undefined {
   if (databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1")) return undefined;
   if (databaseUrl.includes("sslmode=disable")) return undefined;
-  if (databaseUrl.includes("neon.tech") || databaseUrl.includes("sslmode=require")) {
-    return { rejectUnauthorized: true };
-  }
+  // When the URL already sets sslmode, do not also pass ssl (avoids pg verify-full double-handling).
+  if (databaseUrl.includes("sslmode=")) return undefined;
+  if (databaseUrl.includes("neon.tech")) return { rejectUnauthorized: true };
   return undefined;
 }
 
@@ -91,10 +99,17 @@ export type Db = Pool;
 
 export function createPool(databaseUrl: string): Pool {
   const serverless = process.env["VERCEL"] === "1";
+  // Prefer Neon's direct (non-pooler) URL for FOR UPDATE + advisory locks.
+  const preferred =
+    process.env["DATABASE_URL_UNPOOLED"] ??
+    process.env["POSTGRES_URL_NON_POOLING"] ??
+    databaseUrl;
+  const connectionString = normalizeDatabaseUrl(preferred);
   const pool = new pg.Pool({
-    connectionString: databaseUrl,
+    connectionString,
     max: serverless ? 1 : 10,
-    ssl: sslOption(databaseUrl),
+    ssl: sslOption(connectionString),
+    connectionTimeoutMillis: 15_000,
   });
   return new Pool(pool);
 }

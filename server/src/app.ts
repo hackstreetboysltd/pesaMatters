@@ -684,7 +684,14 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       });
       return;
     }
-    log.error("request_failed", { name: error instanceof Error ? error.name : "unknown" });
+    log.error("request_failed", {
+      name: error instanceof Error ? error.name : "unknown",
+      message: error instanceof Error ? error.message.slice(0, 240) : null,
+      code:
+        typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+          ? error.code
+          : null,
+    });
     res.status(500).json({ error: { code: "server_error", message: "Something went wrong. Try again." } });
   });
 

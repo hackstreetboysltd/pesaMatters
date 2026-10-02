@@ -430,7 +430,7 @@ export async function searchMembers(pool: Db, memberId: string, query: string): 
   const [rows] = await pool.query<Row>(
     like === null
       ? "SELECT id, name FROM members WHERE id <> ? ORDER BY name LIMIT 50"
-      : "SELECT id, name FROM members WHERE id <> ? AND name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 50",
+      : "SELECT id, name FROM members WHERE id <> ? AND name LIKE ? ESCAPE E'\\\\' ORDER BY name LIMIT 50",
     like === null ? [memberId] : [memberId, like],
   );
   const found: { id: string; name: string; freeCents: number }[] = [];
