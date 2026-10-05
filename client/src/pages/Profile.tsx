@@ -3,7 +3,7 @@ import { ApiError, api, type LedgerBlock, type Member } from "../api";
 import { BackLink } from "../components/BackLink";
 import { Nav } from "../components/Nav";
 import { Pager } from "../components/Pager";
-import { formatKes, formatNoticeDay } from "../format";
+import { formatKes, formatNoticeDay, formatNoticeTime } from "../format";
 import { LedgerEntry, nameMap, personalBlocks, symbolMap } from "../ledgerView";
 import { useReducedMotion } from "../motion";
 import { accountNotice, actionNotices, mergeNotices, noticeView, readNotices, recordNotice, type Notice } from "../notices";
@@ -167,7 +167,8 @@ export function Profile(): React.ReactElement {
                           {view.detail !== null ? <p className="notice-detail">{view.detail}</p> : null}
                         </div>
                         <time className="notice-when" dateTime={notice.at}>
-                          {formatNoticeDay(notice.at)}
+                          <span className="notice-day">{formatNoticeDay(notice.at)}</span>
+                          <span className="notice-clock">{formatNoticeTime(notice.at)}</span>
                         </time>
                       </li>
                     );

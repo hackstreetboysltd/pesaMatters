@@ -4,6 +4,18 @@ import react from "@vitejs/plugin-react";
 
 const SESSION_COOKIE = "hs_session";
 
+/** Map retired /desk bookmarks onto /admin. */
+function deskToAdmin(path: string): string {
+  if (path === "/desk" || path === "/desk/") return "/admin";
+  if (path === "/desk/login" || path.startsWith("/desk/login/")) return "/admin/login";
+  if (path === "/desk/queue" || path.startsWith("/desk/queue/")) return "/admin/loans";
+  if (path === "/desk/you" || path.startsWith("/desk/you/")) return "/admin/you";
+  const work = path.match(/^\/desk\/work\/([a-f0-9]{32})\/?$/);
+  if (work !== null) return `/admin/loans/${work[1]}`;
+  if (path === "/desk/work" || path.startsWith("/desk/work/")) return "/admin/loans";
+  return "/admin";
+}
+
 /**
  * Cookie-presence gate for document navigations (same idea as internal-app middleware).
  * APIs stay public at this layer; Express still validates the session on /api/*.
@@ -25,18 +37,28 @@ function sessionGate(): Plugin {
         const rawUrl = req.url ?? "/";
         const path = rawUrl.split("?")[0] ?? "/";
         if (path === "/desk" || path.startsWith("/desk/")) {
+          if (!path.includes(".")) {
+            res.statusCode = 302;
+            res.setHeader("Location", deskToAdmin(path));
+            res.end();
+            return;
+          }
+          next();
+          return;
+        }
+        if (path === "/admin" || path.startsWith("/admin/")) {
           const asset = path.includes(".");
           if (!asset) {
-            const deskCookie = /(?:^|;\s*)hs_desk=/.test(req.headers.cookie ?? "");
-            const login = path === "/desk/login" || path.startsWith("/desk/login/");
-            if (!login && !deskCookie) {
+            const adminCookie = /(?:^|;\s*)hs_admin=/.test(req.headers.cookie ?? "");
+            const login = path === "/admin/login" || path.startsWith("/admin/login/");
+            if (!login && !adminCookie) {
               const returnTo = encodeURIComponent(path);
               res.statusCode = 302;
-              res.setHeader("Location", `/desk/login?returnTo=${returnTo}`);
+              res.setHeader("Location", `/admin/login?returnTo=${returnTo}`);
               res.end();
               return;
             }
-            req.url = "/desk.html";
+            req.url = "/admin.html";
           }
           next();
           return;
@@ -75,7 +97,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        desk: resolve(__dirname, "desk.html"),
+        admin: resolve(__dirname, "admin.html"),
       },
     },
   },

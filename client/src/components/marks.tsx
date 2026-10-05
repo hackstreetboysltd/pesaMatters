@@ -29,7 +29,8 @@ export function MarkPot(): ReactElement {
 export function MarkMove(): ReactElement {
   return (
     <Mark>
-      <path d="M4 12h14M13 6.5 19.5 12 13 17.5" {...stroke} />
+      <path d="M5 8.5h12M14 5.5l3 3-3 3" {...stroke} />
+      <path d="M19 15.5H7M10 12.5l-3 3 3 3" {...stroke} />
     </Mark>
   );
 }
@@ -85,6 +86,26 @@ export function MarkBook(): ReactElement {
       <path d="M4.6 6.6v11.2L12 19.6l7.4-1.8V6.6" {...stroke} />
       <path d="M4.6 6.6 12 8.4 19.4 6.6" {...stroke} />
       <path d="M12 8.4v11.2" {...stroke} />
+    </Mark>
+  );
+}
+
+export function MarkHome(): ReactElement {
+  return (
+    <Mark>
+      <path d="M4.5 11.2 12 5.5l7.5 5.7" {...stroke} />
+      <path d="M7 10.8V18.5h10V10.8" {...stroke} />
+    </Mark>
+  );
+}
+
+export function MarkCrew(): ReactElement {
+  return (
+    <Mark>
+      <circle cx="9" cy="9" r="2.2" {...stroke} />
+      <circle cx="15.5" cy="9.5" r="1.8" {...stroke} />
+      <path d="M4.8 17.5c.7-2.4 2.4-3.6 4.7-3.6s4 1.2 4.7 3.6" {...stroke} />
+      <path d="M13.2 14.2c1.3-.4 2.5-.2 3.5.8.7.7 1.1 1.6 1.3 2.5" {...stroke} />
     </Mark>
   );
 }

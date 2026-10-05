@@ -1,6 +1,6 @@
 # Hackstreet PesaMatters
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03 04:11 AM CDT
 
 A phone-first pot for one investment crew. Each member sees the money they can move, their slice of the whole pot, and a hash-linked ledger of deposits, withdrawals, transfers, and investment marks. The books are **Postgres**. The UI is React. The API is Express.
 
@@ -34,7 +34,7 @@ npm install
 ./start.sh
 ```
 
-`./start.sh` frees ports **5173** (Vite), **8787** (API), and **5433** (Postgres, only when the compose DB is not already running), starts Postgres, runs `npm run db:migrate` and `npm run db:seed`, starts the API + Vite, waits until they answer, then opens http://127.0.0.1:5173 in your browser. Press Ctrl+C in that terminal to stop the API and Vite.
+`./start.sh` frees ports **5173** (Vite), **8787** (API), and **5433** (Postgres) — including Docker containers that publish those ports — then ensures Postgres is reachable on the host port (recreates the compose DB if it is “healthy” but unpublished), runs `npm run db:migrate` and `npm run db:seed`, starts the API + Vite, waits until they answer, then opens http://127.0.0.1:5173 in your browser. Press Ctrl+C in that terminal to stop the API and Vite.
 
 You can still use `npm run dev` if you only want the stack without freeing ports or opening a browser. The API is http://127.0.0.1:8787. Postgres is published on port **5433** by default.
 
@@ -60,7 +60,7 @@ DATABASE_URL='postgres://…' npm run db:migrate
 DATABASE_URL='postgres://…' SEED_PASSWORD='…' APP_ORIGIN='https://placeholder.vercel.app' COOKIE_SECURE=true npm run db:seed
 ```
 
-(Use a real `SEED_PASSWORD` ≥ 10 chars. Set `DESK_EMAIL` / `DESK_PASSWORD` in the environment before seed if you want a desk admin.)
+(Use a real `SEED_PASSWORD` ≥ 10 chars. Set `ADMIN_GOOGLE_EMAILS` before seed if you want Google admins.)
 
 ### 2. Upstash
 
@@ -83,8 +83,8 @@ DATABASE_URL='postgres://…' SEED_PASSWORD='…' APP_ORIGIN='https://placeholde
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | from Upstash |
 | `CRON_SECRET` | long random string (Vercel Cron sends `Authorization: Bearer …`) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | production OAuth client |
-| `MPESA_MODE` | start with `mock` |
-| `DESK_EMAIL` / `DESK_PASSWORD` | optional; only used when you re-run seed |
+| `MPESA_MODE` | start with `mock` until the [live checklist](#m-pesa) is done |
+| `ADMIN_GOOGLE_EMAILS` | optional; comma emails pre-provisioned for `/admin` Google sign-in |
 
 4. Deploy. Note the production URL. If `APP_ORIGIN` was a placeholder, set it to the real HTTPS origin and redeploy.
 
@@ -92,25 +92,27 @@ DATABASE_URL='postgres://…' SEED_PASSWORD='…' APP_ORIGIN='https://placeholde
 
 In Google Cloud, add authorized redirect URI:
 
-`https://<your-host>/api/auth/google/callback`
+- `https://<your-host>/api/auth/google/callback` (members and admin share this)
 
 Keep the local URI (`http://127.0.0.1:5173/api/auth/google/callback`) for development.
 
+Seed Google admins with `ADMIN_GOOGLE_EMAILS=you@gmail.com` (comma-separated). Ops use `/admin` with Continue with Google (`hs_admin` cookie). Old `/desk` URLs redirect to `/admin`.
+
 ### 5. Smoke test
 
-Open the production URL → Continue with Google → Move (mock Add) → Invest quote → Desk at `/desk` if seeded.
+Open the production URL → Continue with Google → Move (mock Add) → Invest quote → Admin at `/admin` with a pre-provisioned Google admin.
 
 ### 6. Live M-Pesa (later)
 
-Point Daraja callbacks at:
+Do not set `MPESA_MODE=live` until the full checklist under [M-Pesa](#m-pesa) is finished. Callbacks must be HTTPS:
 
 - `https://<your-host>/api/payments/mpesa/stk`
 - `https://<your-host>/api/payments/mpesa/b2c`
 - `https://<your-host>/api/payments/mpesa/b2c-timeout`
 
-and set the `MPESA_*` live variables.
+Live Add needs `MPESA_SHORTCODE` (Coop business / paybill number), `MPESA_ACCOUNT_NUMBER` (Coop account reference, max 12 characters), plus consumer key, secret, passkey, and `MPESA_CALLBACK_URL`. Out needs the B2C variables as well.
 
-
+## Crew accounts
 
 Sign-in is **Continue with Google**. The browser goes to Google, then back to this app. A verified Google email that is already in the crew signs into that member. A new verified email joins the crew.
 
@@ -172,7 +174,9 @@ flowchart LR
 
 Add and Out go through Safaricom Daraja. Send does not: those shillings are already in the pot, so the stepper confirms the member and writes the ledger.
 
-`MPESA_MODE=mock` (the default) accepts the prompt locally so the stepper can be tried without a paybill. The receipt number is the first 12 hex digits of that move's ledger block hash (`AB12-CD34-EF56`), on screen and in the PDF. A live Daraja token, when one exists, is shown beside it as M-Pesa. `MPESA_MODE=live` needs this app's own consumer key, secret, shortcode, passkey, and an https callback at `/api/payments/mpesa/stk`. Out also needs the B2C initiator, security credential, and result URL at `/api/payments/mpesa/b2c`. Leave those in `.env`. The browser never sees them.
+`MPESA_MODE=mock` (the default) accepts the prompt locally so the stepper can be tried without a paybill. The receipt number is the first 12 hex digits of that move's ledger block hash (`AB12-CD34-EF56`), on screen and in the PDF. A live Daraja token, when one exists, is shown beside it as M-Pesa.
+
+In live mode, Add is STK `CustomerPayBillOnline` to your Coop **paybill** (`MPESA_SHORTCODE`) with `AccountReference` = your Coop **account number** (`MPESA_ACCOUNT_NUMBER`, max 12 characters). Payment correlation stays on `CheckoutRequestID`, not that account field. Out is Daraja **B2C** from a funded shortcode float (request B2C on go-live; fund it from the same Coop account). A retail paybill alone cannot pay phones. Leave all `MPESA_*` values in `.env` / Vercel env. The browser never sees them.
 
 The ledger row is written only after Daraja reports result code 0, or immediately for Send. A second callback for the same checkout does not credit twice. The PDF is `GET /api/payments/:id/receipt.pdf` for the member who paid or, on a send, the member who received it.
 
@@ -188,6 +192,39 @@ sequenceDiagram
   App->>App: Ledger block and receipt
   You->>App: Download PDF or open Activity
 ```
+
+### Zero-to-live checklist (Coop paybill + Daraja)
+
+Do these in order. Keep `MPESA_MODE=mock` until step 8.
+
+1. **Confirm Coop destination.** From Coop Bank (app / Internet Banking / branch), get the **business number** (paybill) and **account number** (Account Reference). Manually Pay Bill KES 10 on your phone and confirm the Coop statement credits. If that fails, stop — Daraja cannot fix a wrong mapping. Later: `MPESA_SHORTCODE` = business number, `MPESA_ACCOUNT_NUMBER` = account number.
+2. **Deploy on HTTPS.** Finish [Deploy](#deploy-vercel--neon--upstash) so you have a stable `https://<your-host>`. Set `APP_ORIGIN` and `COOKIE_SECURE=true`. Confirm the app and that Safaricom can POST the three callback paths above.
+3. **Create a Daraja account** at [developer.safaricom.co.ke](https://developer.safaricom.co.ke/). Use a long-lived org email.
+4. **Sandbox app (optional).** Create a sandbox app; store consumer key/secret in a password manager. Use Safaricom’s sandbox shortcode/passkey from their STK docs — not your Coop production numbers. Product testing without Daraja still uses `MPESA_MODE=mock`.
+5. **Production shortcode + passkey.** Confirm the paybill from step 1 is eligible for **Lipa Na M-Pesa Online (STK)** via Daraja (ask Coop and Safaricom M-Pesa Business if unclear). Complete Daraja **Go Live**, attach that shortcode, and use the same Coop account as settlement. Collect production consumer key, secret, shortcode, and Lipa Na M-Pesa Online **passkey**.
+6. **Register callback URLs** on the production app (same three HTTPS paths as Deploy §6).
+7. **B2C for Out / loan payouts (optional for Add-only).** Ask Safaricom to enable B2C; create initiator + security credential; note `MPESA_B2C_SHORTCODE` if it differs. Fund the B2C float from the Coop account. Without B2C, Out fails closed (`b2c_off`); Add and Send still work.
+8. **Set Vercel env (Production)** and redeploy:
+
+```bash
+MPESA_MODE=live
+MPESA_ENV=production
+MPESA_CONSUMER_KEY=…
+MPESA_CONSUMER_SECRET=…
+MPESA_SHORTCODE=…              # Coop business / paybill number
+MPESA_ACCOUNT_NUMBER=…         # Coop account reference (max 12)
+MPESA_PASSKEY=…
+MPESA_CALLBACK_URL=https://<your-host>/api/payments/mpesa/stk
+# After step 7:
+MPESA_INITIATOR_NAME=…
+MPESA_SECURITY_CREDENTIAL=…
+MPESA_B2C_SHORTCODE=…          # if different from shortcode
+MPESA_B2C_RESULT_URL=https://<your-host>/api/payments/mpesa/b2c
+MPESA_B2C_TIMEOUT_URL=https://<your-host>/api/payments/mpesa/b2c-timeout
+```
+
+9. **Smoke test.** Add a small whole-KES amount → PIN → Coop statement credits and app claim rises. Send between members → ledger only, no M-Pesa. Out only if B2C is funded. If M-Pesa succeeds but the ledger does not, check Vercel logs and that `MPESA_CALLBACK_URL` matches the deploy host.
+10. **Operate.** One Daraja credential set for this app only; rotate portal + Vercel together. Refunds are not built — handle manually in Coop/M-Pesa if needed.
 
 <sub>[↑ Back to contents](#contents)</sub>
 
@@ -262,7 +299,8 @@ The tests cover hash linking, a tampered block, transfers, withdrawals that the 
 - **Google sends you back and sign-in does not finish.** Stay in the same tab you started from, at `http://127.0.0.1:5173` (the same origin as `APP_ORIGIN`). The sign-in attempt lives in that tab, not in a cookie. The redirect URI in Google Cloud must still be `http://127.0.0.1:5173/api/auth/google/callback`.
 - **You land on home without signing in.** Hard-refresh. Unauthenticated document loads should 302 to `/login`. If Vite was started before this gate landed, restart `./start.sh`.
 - **The API never becomes ready.** Check `docker compose ps`. The database must be healthy on port 5433 (or `POSTGRES_PORT`), and `DATABASE_URL` must use the same password as `POSTGRES_PASSWORD`. Run `npm run db:migrate` once against a fresh volume.
-- **Port 5173 or 8787 is taken.** Run `./start.sh` — it stops whatever is holding those ports before starting. Or change `PORT` and the Vite port together. The Vite dev server proxies `/api` to 8787.
-- **M-Pesa says it did not accept the request.** With `MPESA_MODE=mock`, restart the API so the payments table exists (`npm run db:migrate`). For live mode, the callback URL has to be https and the consumer key has to belong to this app. Out stays unavailable until the B2C variables are set.
+- **Port 5173, 8787, or 5433 is taken.** Run `./start.sh` — it stops host processes and Docker containers publishing those ports before starting. Or change `PORT` / `POSTGRES_PORT` and the Vite port together. The Vite dev server proxies `/api` to 8787.
+- **M-Pesa says it did not accept the request.** With `MPESA_MODE=mock`, restart the API so the payments table exists (`npm run db:migrate`). For live mode, the callback URL has to be https, `MPESA_ACCOUNT_NUMBER` must be set (Coop account reference, max 12 characters), and the consumer key has to belong to this app. Out stays unavailable until the B2C variables are set.
+- **Live Add credits M-Pesa but not the Coop statement.** Confirm a manual Pay Bill with the same business number and account number works. `MPESA_SHORTCODE` and `MPESA_ACCOUNT_NUMBER` must match that pair.
 
 <sub>[↑ Back to contents](#contents)</sub>

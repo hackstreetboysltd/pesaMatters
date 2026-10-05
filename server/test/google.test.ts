@@ -167,6 +167,35 @@ test("a Google callback with no cookies still hands the code to the login page",
   assert.equal(url.searchParams.get("error"), null);
 });
 
+test("admin Google callback handoff lands on /admin/login", () => {
+  const state = `a.${"b".repeat(64)}`;
+  const url = new URL(
+    googleCallbackHandoff({
+      error: null,
+      code: "admin-code-1",
+      state,
+      clientOrigin: "http://127.0.0.1:5173",
+    }),
+  );
+  assert.equal(url.pathname, "/admin/login");
+  assert.equal(url.searchParams.get("code"), "admin-code-1");
+  assert.equal(url.searchParams.get("state"), state);
+});
+
+test("handoff loginPath ignores open redirects", () => {
+  const state = "c".repeat(64);
+  const url = new URL(
+    googleCallbackHandoff({
+      error: null,
+      code: "abc+defghi",
+      state,
+      clientOrigin: "http://127.0.0.1:5173",
+      loginPath: "https://evil.example/login",
+    }),
+  );
+  assert.equal(url.pathname, "/login");
+});
+
 test("a cancelled Google callback becomes google_denied, and any other provider error stays generic", () => {
   const denied = new URL(
     googleCallbackHandoff({

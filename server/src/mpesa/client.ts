@@ -21,6 +21,24 @@ export type Rails = {
   b2c: (input: B2cInput) => Promise<B2cParsed>;
 };
 
+/** Paybill routing fields for STK. AccountReference is the bank account, not the payment id. */
+export function stkPaybillRouting(
+  shortcode: string,
+  accountNumber: string,
+): {
+  BusinessShortCode: string;
+  PartyB: string;
+  AccountReference: string;
+  TransactionType: "CustomerPayBillOnline";
+} {
+  return {
+    BusinessShortCode: shortcode,
+    PartyB: shortcode,
+    AccountReference: accountNumber,
+    TransactionType: "CustomerPayBillOnline",
+  };
+}
+
 export function mockRails(): Rails {
   return {
     mode: "mock",
@@ -78,20 +96,18 @@ export function liveRails(creds: MpesaLive): Rails {
     async stkPush(input: StkPushInput): Promise<StkPushParsed> {
       const token = await accessToken();
       const { password, timestamp } = signedBody();
+      const routing = stkPaybillRouting(creds.shortcode, creds.accountNumber);
       const stkRes = await fetch(`${baseUrl(creds.env)}/mpesa/stkpush/v1/processrequest`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          BusinessShortCode: creds.shortcode,
+          ...routing,
           Password: password,
           Timestamp: timestamp,
-          TransactionType: "CustomerPayBillOnline",
           Amount: input.amountKsh,
           PartyA: input.phone,
-          PartyB: creds.shortcode,
           PhoneNumber: input.phone,
           CallBackURL: creds.callbackUrl,
-          AccountReference: input.accountRef.slice(0, 12),
           TransactionDesc: "PesaMatters",
         }),
         signal: AbortSignal.timeout(20_000),

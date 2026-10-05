@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-05
+
+### Changed
+
+- Ops moved from the retired Desk SPA to **Admin** at `/admin` with Google-only sign-in (`ADMIN_GOOGLE_EMAILS`). Bookmark paths under `/desk` redirect to `/admin`. Session cookie is `hs_admin`; session rows live in `admin_sessions`.
+
+### Removed
+
+- Desk password login (`DESK_EMAIL` / `DESK_PASSWORD`), the Desk Vite SPA, and unused password verification for admins.
+
+### Fixed
+
+- `./start.sh` no longer reports a Docker-published port (e.g. **5433**) as free when `ss -p` omits PIDs. It detects LISTEN state, stops containers that publish the port, then kills host listeners before starting Postgres.
+- `./start.sh` no longer treats a healthy compose DB as ready when the host port is unpublished (`NetworkSettings.Ports={}`). It recreates the container and waits until `127.0.0.1:POSTGRES_PORT` accepts connections before migrate/seed.
+
+## 2026-10-03
+
+### Added
+
+- Live Add STK routes to a Coop (or other) paybill account via `MPESA_ACCOUNT_NUMBER` (Daraja `AccountReference`, max 12 characters). `MPESA_SHORTCODE` remains the business / paybill number. README includes a zero-to-live Daraja + Coop checklist.
+- Config tests cover live M-Pesa requirements, including a required account number.
+
+### Changed
+
+- STK no longer puts the internal payment id in `AccountReference`; correlation stays on `CheckoutRequestID` / `MerchantRequestID`. Send stays ledger-only. Out stays Daraja B2C (fund the float from the Coop account after go-live).
+
 ## 2026-10-01
 
 ### Changed

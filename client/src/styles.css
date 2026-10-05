@@ -282,6 +282,10 @@ a {
 }
 
 .notice-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
   margin: 0;
   padding-top: 0.15rem;
   font-family: var(--font-ui);
@@ -290,6 +294,11 @@ a {
   line-height: 1.2;
   color: var(--ash);
   white-space: nowrap;
+}
+
+.notice-day,
+.notice-clock {
+  display: block;
 }
 
 .goal-form {
@@ -2545,6 +2554,99 @@ a.loan-line {
 .receipt-slip .hint a {
   font-weight: 700;
   text-underline-offset: 0.18em;
+}
+
+.admin-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+}
+
+.admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.85rem 0.9rem;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 0.85rem;
+  background: var(--slip);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 12%, transparent);
+  cursor: pointer;
+  font: inherit;
+}
+
+.admin-stat:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
+
+.admin-stat.hot {
+  border-color: color-mix(in srgb, var(--ember) 55%, transparent);
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ember) 35%, transparent);
+}
+
+.admin-stat-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink) 62%, transparent);
+}
+
+.admin-stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.admin-stat-hint {
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--ink) 58%, transparent);
+}
+
+.admin-lanes {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0 0 0.75rem;
+  overflow-x: auto;
+}
+
+.admin-lanes button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  padding: 0.35rem 0.2rem;
+  box-shadow: inset 0 -2px 0 transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.admin-lanes button[aria-selected="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ember);
+}
+
+.admin-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+}
+
+.admin-health::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--ember);
+}
+
+.admin-health.live::before {
+  background: #1a7a4c;
 }
 
 @media (min-width: 768px) {

@@ -11,5 +11,19 @@ export function safeReturnTo(raw: string | null | undefined, fallback = "/"): st
   if (value === "/login" || value.startsWith("/login?") || value.startsWith("/login/")) {
     return fallback;
   }
+  if (value === "/admin/login" || value.startsWith("/admin/login?") || value.startsWith("/admin/login/")) {
+    return fallback;
+  }
   return value;
+}
+
+/** Admin SPA post-login path (basename `/admin`). */
+export function safeAdminReturnTo(raw: string | null | undefined, fallback = "/"): string {
+  const next = safeReturnTo(raw, fallback);
+  if (next === "/admin" || next.startsWith("/admin/")) {
+    const stripped = next === "/admin" ? "/" : next.slice("/admin".length);
+    return stripped.startsWith("/") ? stripped : `/${stripped}`;
+  }
+  if (next.startsWith("/") && !next.startsWith("//")) return next;
+  return fallback;
 }

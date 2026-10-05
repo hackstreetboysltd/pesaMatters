@@ -17,6 +17,8 @@ const Env = z.object({
   MPESA_CONSUMER_KEY: z.preprocess(emptyAsUnset, z.string().min(8).max(200).optional()),
   MPESA_CONSUMER_SECRET: z.preprocess(emptyAsUnset, z.string().min(8).max(200).optional()),
   MPESA_SHORTCODE: z.preprocess(emptyAsUnset, z.string().regex(/^\d{5,7}$/).optional()),
+  /** Coop (or other) paybill account reference. Daraja AccountReference max is 12 chars. */
+  MPESA_ACCOUNT_NUMBER: z.preprocess(emptyAsUnset, z.string().regex(/^[A-Za-z0-9]{1,12}$/).optional()),
   MPESA_PASSKEY: z.preprocess(emptyAsUnset, z.string().min(8).max(200).optional()),
   MPESA_CALLBACK_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
   MPESA_INITIATOR_NAME: z.preprocess(emptyAsUnset, z.string().min(1).max(80).optional()),
@@ -24,8 +26,8 @@ const Env = z.object({
   MPESA_B2C_SHORTCODE: z.preprocess(emptyAsUnset, z.string().regex(/^\d{5,7}$/).optional()),
   MPESA_B2C_RESULT_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
   MPESA_B2C_TIMEOUT_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
-  DESK_EMAIL: z.preprocess(emptyAsUnset, z.string().trim().email().max(254).optional()),
-  DESK_PASSWORD: z.preprocess(emptyAsUnset, z.string().min(10).max(200).optional()),
+  /** Comma-separated emails that may Google-sign into admin (pre-provisioned admins rows). */
+  ADMIN_GOOGLE_EMAILS: z.preprocess(emptyAsUnset, z.string().max(2000).optional()),
   UPSTASH_REDIS_REST_URL: z.preprocess(emptyAsUnset, z.string().url().max(300).optional()),
   UPSTASH_REDIS_REST_TOKEN: z.preprocess(emptyAsUnset, z.string().min(8).max(500).optional()),
   // Vercel Marketplace Upstash / KV names
@@ -45,6 +47,8 @@ export type MpesaLive = {
   consumerKey: string;
   consumerSecret: string;
   shortcode: string;
+  /** Paybill Account Reference (e.g. Coop Bank account number). */
+  accountNumber: string;
   passkey: string;
   callbackUrl: string;
   b2c: {
@@ -66,8 +70,7 @@ export type AppConfig = {
   cookieSecure: boolean;
   google: GoogleConfig | null;
   mpesa: MpesaConfig;
-  deskEmail: string | null;
-  deskPassword: string | null;
+  adminGoogleEmails: string[];
   upstashUrl: string | null;
   upstashToken: string | null;
   cronSecret: string | null;
@@ -85,11 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if ((clientId === undefined) !== (clientSecret === undefined)) {
     throw new Error("Invalid configuration: GOOGLE_CLIENT_ID");
   }
-  const deskEmail = parsed.data.DESK_EMAIL?.toLowerCase() ?? null;
-  const deskPassword = parsed.data.DESK_PASSWORD ?? null;
-  if ((deskEmail === null) !== (deskPassword === null)) {
-    throw new Error("Invalid configuration: DESK_EMAIL");
-  }
+  const adminGoogleEmails = parseAdminGoogleEmails(parsed.data.ADMIN_GOOGLE_EMAILS);
   const upstashUrl = parsed.data.UPSTASH_REDIS_REST_URL ?? parsed.data.KV_REST_API_URL ?? null;
   const upstashToken = parsed.data.UPSTASH_REDIS_REST_TOKEN ?? parsed.data.KV_REST_API_TOKEN ?? null;
   if ((upstashUrl === null) !== (upstashToken === null)) {
@@ -103,12 +102,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure: parsed.data.COOKIE_SECURE === "true",
     google: clientId !== undefined && clientSecret !== undefined ? { clientId, clientSecret } : null,
     mpesa: mpesaFrom(parsed.data),
-    deskEmail,
-    deskPassword,
+    adminGoogleEmails,
     upstashUrl,
     upstashToken,
     cronSecret: parsed.data.CRON_SECRET ?? null,
   };
+}
+
+/** Split and normalize admin Google allowlist emails. Invalid entries are dropped. */
+export function parseAdminGoogleEmails(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim().length === 0) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const email = part.trim().toLowerCase();
+    if (email.length === 0 || email.length > 254 || !email.includes("@")) continue;
+    if (seen.has(email)) continue;
+    seen.add(email);
+    out.push(email);
+  }
+  return out;
 }
 
 function mpesaFrom(data: z.infer<typeof Env>): MpesaConfig {
@@ -116,12 +129,14 @@ function mpesaFrom(data: z.infer<typeof Env>): MpesaConfig {
   const key = data.MPESA_CONSUMER_KEY;
   const secret = data.MPESA_CONSUMER_SECRET;
   const shortcode = data.MPESA_SHORTCODE;
+  const accountNumber = data.MPESA_ACCOUNT_NUMBER;
   const passkey = data.MPESA_PASSKEY;
   const callbackUrl = data.MPESA_CALLBACK_URL;
   if (
     key === undefined ||
     secret === undefined ||
     shortcode === undefined ||
+    accountNumber === undefined ||
     passkey === undefined ||
     callbackUrl === undefined
   ) {
@@ -148,6 +163,7 @@ function mpesaFrom(data: z.infer<typeof Env>): MpesaConfig {
     consumerKey: key,
     consumerSecret: secret,
     shortcode,
+    accountNumber,
     passkey,
     callbackUrl,
     b2c:

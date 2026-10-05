@@ -4,10 +4,24 @@ import {
   MAX_AMOUNT_CENTS,
   MAX_MPESA_CENTS,
   explainShillings,
+  formatNoticeTime,
   formatShillingsTyping,
   parseShillings,
   shillingsToCents,
 } from "../src/format.ts";
+
+test("formatNoticeTime is a lowercase 12-hour clock", () => {
+  const iso = "2026-10-02T20:38:00.000Z";
+  const expected = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(new Date(iso))
+    .toLowerCase();
+  assert.equal(formatNoticeTime(iso), expected);
+  assert.equal(formatNoticeTime("not-a-date"), "not-a-date");
+});
 
 test("formatShillingsTyping keeps every digit and groups thousands", () => {
   assert.equal(formatShillingsTyping("10000000000"), "10,000,000,000");

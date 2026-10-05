@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { loadConfig } from "../src/config.ts";
 import { createPool } from "../src/db.ts";
 import { log } from "../src/logger.ts";
-import { ensureDeskAdmin, seedLoanProducts } from "../src/loans/service.ts";
+import { ensureGoogleAdmins, seedLoanProducts } from "../src/loans/service.ts";
 import { ensureGenesis, seedCrew } from "../src/store.ts";
 
 dotenv.config({ path: resolve(process.cwd(), "../.env") });
@@ -16,7 +16,7 @@ try {
   await ensureGenesis(pool);
   await seedCrew(pool, config.seedPassword);
   await seedLoanProducts(pool);
-  await ensureDeskAdmin(pool, config.deskEmail, config.deskPassword);
+  await ensureGoogleAdmins(pool, config.adminGoogleEmails);
   log.info("seed_done");
 } finally {
   await pool.end();

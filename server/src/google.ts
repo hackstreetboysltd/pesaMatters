@@ -92,18 +92,33 @@ export function codeChallenge(verifier: string): string {
 }
 
 /**
- * Turns Google's GET callback into a same-origin `/login` handoff.
+ * Turns Google's GET callback into a same-origin login handoff.
  * The SPA finishes PKCE from sessionStorage, so the verifier never sits in a
  * cookie that bounce-tracking can strip on the 302 to Google.
  * `code` and `state` must already be read with `rawQueryParam` so a "+" stays "+".
+ * Admin flows prefix OAuth `state` with `a.` so one redirect URI serves both portals.
  */
+export const ADMIN_OAUTH_STATE_PREFIX = "a.";
+
+export function googleOAuthRedirectUri(appOrigin: string): string {
+  return `${appOrigin}/api/auth/google/callback`;
+}
+
+/** Pick member vs admin login from the OAuth state prefix. */
+export function loginPathFromOAuthState(state: string | null | undefined): "/login" | "/admin/login" {
+  if (typeof state === "string" && state.startsWith(ADMIN_OAUTH_STATE_PREFIX)) return "/admin/login";
+  return "/login";
+}
+
 export function googleCallbackHandoff(input: {
   error: string | null;
   code: string | null;
   state: string | null;
   clientOrigin: string;
+  loginPath?: string;
 }): string {
-  const login = new URL("/login", input.clientOrigin);
+  const path = safeLoginPath(input.loginPath ?? loginPathFromOAuthState(input.state));
+  const login = new URL(path, input.clientOrigin);
   if (input.error !== null && input.error.length > 0) {
     login.searchParams.set("error", googleProviderErrorCode(input.error));
     return login.toString();
@@ -117,6 +132,13 @@ export function googleCallbackHandoff(input: {
   login.searchParams.set("code", code);
   login.searchParams.set("state", state);
   return login.toString();
+}
+
+/** Only relative app login paths — never an open redirect. */
+function safeLoginPath(raw: string | undefined): string {
+  if (raw === undefined || raw.length === 0) return "/login";
+  if (raw === "/login" || raw === "/admin/login") return raw;
+  return "/login";
 }
 
 /** Maps Google's OAuth `error` query to an allowlisted app code. Never echoes the raw value. */

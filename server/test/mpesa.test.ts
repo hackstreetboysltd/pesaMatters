@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { receiptFromB2c, receiptFromStk, B2cResultBody, StkCallbackBody } from "../src/mpesa/callback.ts";
+import { stkPaybillRouting } from "../src/mpesa/client.ts";
 import { darajaPassword, darajaTimestamp, parseStkPushResponse, stkOutcome } from "../src/mpesa/daraja.ts";
 import { kenyanMsisdn } from "../src/mpesa/phone.ts";
 import { receiptNumberFromHash, shownMpesaReceipt } from "../src/receiptNo.ts";
 import { receiptPdf } from "../src/receiptPdf.ts";
+
+test("STK paybill routing uses the Coop account number as AccountReference", () => {
+  const routing = stkPaybillRouting("400200", "0123456789");
+  assert.equal(routing.TransactionType, "CustomerPayBillOnline");
+  assert.equal(routing.BusinessShortCode, "400200");
+  assert.equal(routing.PartyB, "400200");
+  assert.equal(routing.AccountReference, "0123456789");
+});
 
 test("daraja timestamp is fourteen Nairobi digits and the password is base64", () => {
   const stamp = darajaTimestamp(new Date("2026-10-01T12:00:00.000Z"));

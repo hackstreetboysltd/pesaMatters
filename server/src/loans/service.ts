@@ -2,7 +2,6 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Conn, Db, Row } from "../db.ts";
 import type { Rails } from "../mpesa/client.ts";
 import { completeLoanOut, PaymentError, startLoanPayout } from "../payments.ts";
-import { hashPassword, verifyPassword } from "../passwords.ts";
 import { coverMismatch, freeDepositsCents, payoutCents, refuseBorrow, refuseGuarantee } from "./capacity.ts";
 import { LOAN_PRODUCTS, productByCode, type LoanProduct } from "./products.ts";
 import { gate, guaranteesMet, OPEN_STATUSES, statusAfterSubmit } from "./status.ts";
@@ -177,47 +176,99 @@ export async function seedLoanProducts(pool: Db): Promise<void> {
   }
 }
 
-export async function ensureDeskAdmin(pool: Db, email: string | null, password: string | null): Promise<void> {
-  if (email === null || password === null) return;
-  const [existing] = await pool.query<Row>("SELECT id FROM admins LIMIT 1");
-  if (existing.length > 0) return;
-  const id = randomBytes(16).toString("hex");
-  const local = email.split("@")[0] ?? "Desk";
-  const name = local.slice(0, 80);
-  await pool.query(
-    "INSERT INTO admins (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-    [id, name.length > 0 ? name : "Desk", email, await hashPassword(password), stamp()],
-  );
+export async function ensureGoogleAdmins(pool: Db, emails: readonly string[]): Promise<void> {
+  for (const email of emails) {
+    const [rows] = await pool.query<Row>("SELECT id FROM admins WHERE email = ? LIMIT 1", [email]);
+    if (rows[0] !== undefined) continue;
+    const id = randomBytes(16).toString("hex");
+    const local = email.split("@")[0] ?? "Admin";
+    const name = local.slice(0, 80);
+    await pool.query(
+      "INSERT INTO admins (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+      [id, name.length > 0 ? name : "Admin", email, "google", stamp()],
+    );
+  }
 }
 
-export async function openDeskSession(pool: Db, email: string, password: string): Promise<{ token: string; admin: { id: string; name: string; email: string } } | null> {
+export type Admin = { id: string; name: string; email: string };
+
+/** The Google account is not on the admins table, or is tied to a different subject. */
+export class AdminGoogleError extends Error {
+  readonly code: "not_admin" | "google_conflict";
+
+  constructor(code: "not_admin" | "google_conflict") {
+    super(code);
+    this.name = "AdminGoogleError";
+    this.code = code;
+  }
+}
+
+/**
+ * Sign in a pre-provisioned admin via Google. Never creates an admin row.
+ * Links google_sub on first successful email match.
+ */
+export async function adminFromGoogle(
+  pool: Db,
+  profile: { sub: string; email: string; name: string },
+): Promise<Admin> {
+  const bySub = await findAdminByGoogleSub(pool, profile.sub);
+  if (bySub !== null) return bySub;
+  const byEmail = await findAdminByEmail(pool, profile.email);
+  if (byEmail === null) throw new AdminGoogleError("not_admin");
+  if (byEmail.googleSub !== null && byEmail.googleSub !== profile.sub) {
+    throw new AdminGoogleError("google_conflict");
+  }
+  if (byEmail.googleSub === null) {
+    await pool.query("UPDATE admins SET google_sub = ? WHERE id = ?", [profile.sub, byEmail.id]);
+  }
+  return { id: byEmail.id, name: byEmail.name, email: byEmail.email };
+}
+
+async function findAdminByGoogleSub(pool: Db, sub: string): Promise<Admin | null> {
   const [rows] = await pool.query<Row>(
-    "SELECT id, name, email, password_hash FROM admins WHERE email = ? LIMIT 1",
+    "SELECT id, name, email FROM admins WHERE google_sub = ? LIMIT 1",
+    [sub],
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  return { id: String(row["id"]), name: String(row["name"]), email: String(row["email"]) };
+}
+
+async function findAdminByEmail(
+  pool: Db,
+  email: string,
+): Promise<(Admin & { googleSub: string | null }) | null> {
+  const [rows] = await pool.query<Row>(
+    "SELECT id, name, email, google_sub FROM admins WHERE email = ? LIMIT 1",
     [email],
   );
   const row = rows[0];
-  if (row === undefined || typeof row["password_hash"] !== "string") return null;
-  const ok = await verifyPassword(password, row["password_hash"]);
-  if (!ok) return null;
-  const token = randomBytes(32).toString("base64url");
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const adminId = String(row["id"]);
-  await pool.query("INSERT INTO desk_sessions (token_hash, admin_id, expires_at) VALUES (?, ?, ?)", [
-    tokenHash,
-    adminId,
-    stamp(new Date(Date.now() + 1000 * 60 * 60 * 12)),
-  ]);
+  if (row === undefined) return null;
+  const googleSub = row["google_sub"];
   return {
-    token,
-    admin: { id: adminId, name: String(row["name"]), email: String(row["email"]) },
+    id: String(row["id"]),
+    name: String(row["name"]),
+    email: String(row["email"]),
+    googleSub: googleSub === null || googleSub === undefined ? null : String(googleSub),
   };
 }
 
-export async function adminFromToken(pool: Db, token: string): Promise<{ id: string; name: string; email: string } | null> {
+export async function openAdminSession(pool: Db, admin: Admin): Promise<string> {
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  await pool.query("INSERT INTO admin_sessions (token_hash, admin_id, expires_at) VALUES (?, ?, ?)", [
+    tokenHash,
+    admin.id,
+    stamp(new Date(Date.now() + 1000 * 60 * 60 * 12)),
+  ]);
+  return token;
+}
+
+export async function adminFromToken(pool: Db, token: string): Promise<Admin | null> {
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const [rows] = await pool.query<Row>(
     `SELECT a.id, a.name, a.email
-     FROM desk_sessions s
+     FROM admin_sessions s
      JOIN admins a ON a.id = s.admin_id
      WHERE s.token_hash = ? AND s.expires_at > NOW()
      LIMIT 1`,
@@ -228,9 +279,9 @@ export async function adminFromToken(pool: Db, token: string): Promise<{ id: str
   return { id: String(row["id"]), name: String(row["name"]), email: String(row["email"]) };
 }
 
-export async function closeDeskSession(pool: Db, token: string): Promise<void> {
+export async function closeAdminSession(pool: Db, token: string): Promise<void> {
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  await pool.query("DELETE FROM desk_sessions WHERE token_hash = ?", [tokenHash]);
+  await pool.query("DELETE FROM admin_sessions WHERE token_hash = ?", [tokenHash]);
 }
 
 async function depositsOf(conn: Conn | Db, memberId: string, lock: boolean): Promise<number> {

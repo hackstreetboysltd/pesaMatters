@@ -7,7 +7,9 @@ import { log } from "./logger.ts";
 import {
   exchangeGoogleCode,
   googleCallbackHandoff,
+  googleOAuthRedirectUri,
   googleSignInFailure,
+  loginPathFromOAuthState,
   loadGoogleCerts,
   rawQueryParam,
 } from "./google.ts";
@@ -15,8 +17,9 @@ import { MoneyError } from "./money.ts";
 import { liveRails, mockRails, type Rails } from "./mpesa/client.ts";
 import { B2cResultBody, receiptFromB2c, receiptFromStk, StkCallbackBody } from "./mpesa/callback.ts";
 import { kenyanMsisdn } from "./mpesa/phone.ts";
-import { registerDeskRoutes, registerMemberLoanRoutes } from "./loans/http.ts";
-import { ensureDeskAdmin, LoanError, seedLoanProducts } from "./loans/service.ts";
+import { registerAdminRoutes } from "./admin/http.ts";
+import { registerMemberLoanRoutes } from "./loans/http.ts";
+import { ensureGoogleAdmins, LoanError, seedLoanProducts } from "./loans/service.ts";
 import { PaymentError, applyDarajaResult, checkPayment, receiptFile, receiptFor, startPayment } from "./payments.ts";
 import {
   QuoteError,
@@ -252,7 +255,7 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       await ensureGenesis(pool);
       await seedCrew(pool, config.seedPassword);
       await seedLoanProducts(pool);
-      await ensureDeskAdmin(pool, config.deskEmail, config.deskPassword);
+      await ensureGoogleAdmins(pool, config.adminGoogleEmails);
       res.json({ ok: true, bootstrapped: true });
     }),
   );
@@ -299,8 +302,10 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
   });
 
   // Google returns here. Hand the code to the SPA; do not exchange it and do not read a cookie.
+  // Admin starts with state prefix `a.` so handoff lands on /admin/login.
   app.get("/api/auth/google/callback", (req, res) => {
     const providerError = rawQueryParam(req.originalUrl, "error");
+    const state = rawQueryParam(req.originalUrl, "state");
     if (providerError !== null) {
       log.warn("google_signin_failed", { reason: providerError === "access_denied" ? "google_denied" : "google", detail: null });
     }
@@ -309,8 +314,9 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       googleCallbackHandoff({
         error: providerError,
         code: rawQueryParam(req.originalUrl, "code"),
-        state: rawQueryParam(req.originalUrl, "state"),
+        state,
         clientOrigin: config.appOrigin,
+        loginPath: loginPathFromOAuthState(state),
       }),
     );
   });
@@ -418,10 +424,10 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
     }),
   );
 
-  registerDeskRoutes(app, pool, config, rails);
+  registerAdminRoutes(app, pool, config, limiter, rails);
 
   app.use((req, _res, next) => {
-    if (req.path.startsWith("/api/desk")) {
+    if (req.path.startsWith("/api/admin")) {
       next();
       return;
     }
@@ -723,7 +729,7 @@ function publicMember(member: Member): { id: string; name: string; email: string
 }
 
 function googleRedirectUri(config: AppConfig): string {
-  return `${config.appOrigin}/api/auth/google/callback`;
+  return googleOAuthRedirectUri(config.appOrigin);
 }
 
 function rejectGoogle(code: string): never {

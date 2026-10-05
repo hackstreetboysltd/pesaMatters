@@ -86,15 +86,30 @@ CREATE TABLE IF NOT EXISTS admins (
   email VARCHAR(254) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
+  google_sub VARCHAR(255) NULL,
   CONSTRAINT admins_email UNIQUE (email)
 );
 
-CREATE TABLE IF NOT EXISTS desk_sessions (
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS google_sub VARCHAR(255) NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS admins_google_sub_uidx ON admins (google_sub);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
   token_hash CHAR(64) PRIMARY KEY,
   admin_id CHAR(32) NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
-  CONSTRAINT desk_sessions_admin FOREIGN KEY (admin_id) REFERENCES admins (id)
+  CONSTRAINT admin_sessions_admin FOREIGN KEY (admin_id) REFERENCES admins (id)
 );
+
+-- One-time cutover from the retired desk_sessions name.
+DO $$
+BEGIN
+  IF to_regclass('public.desk_sessions') IS NOT NULL THEN
+    INSERT INTO admin_sessions (token_hash, admin_id, expires_at)
+    SELECT token_hash, admin_id, expires_at FROM desk_sessions
+    ON CONFLICT (token_hash) DO NOTHING;
+    DROP TABLE desk_sessions;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS loan_products (
   code VARCHAR(16) NOT NULL PRIMARY KEY,

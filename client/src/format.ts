@@ -65,6 +65,19 @@ export function formatNoticeDay(iso: string): string {
   }).format(date);
 }
 
+/** Compact clock for a notification row, such as `11:38 pm`. */
+export function formatNoticeTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(date)
+    .toLowerCase();
+}
+
 /** Ledger / API ceiling: 100 million Kenya shillings, stored as integer cents. */
 export const MAX_AMOUNT_CENTS = 100_000_000_00;
 

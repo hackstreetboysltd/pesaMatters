@@ -3,11 +3,20 @@
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "client/dist",
   "framework": null,
+  "redirects": [
+    { "source": "/desk", "destination": "/admin", "permanent": false },
+    { "source": "/desk/login", "destination": "/admin/login", "permanent": false },
+    { "source": "/desk/queue", "destination": "/admin/loans", "permanent": false },
+    { "source": "/desk/you", "destination": "/admin/you", "permanent": false },
+    { "source": "/desk/work/:id", "destination": "/admin/loans/:id", "permanent": false },
+    { "source": "/desk/work", "destination": "/admin/loans", "permanent": false },
+    { "source": "/desk/:path*", "destination": "/admin", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/desk", "destination": "/desk.html" },
-    { "source": "/desk/(.*)", "destination": "/desk.html" },
-    { "source": "/((?!api/|desk\\.html|assets/|.*\\..*).*)", "destination": "/index.html" }
+    { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/admin/(.*)", "destination": "/admin.html" },
+    { "source": "/((?!api/|admin\\.html|assets/|.*\\..*).*)", "destination": "/index.html" }
   ],
   "crons": [
     {

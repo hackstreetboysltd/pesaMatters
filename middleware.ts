@@ -1,5 +1,5 @@
 const SESSION = "hs_session";
-const DESK = "hs_desk";
+const ADMIN = "hs_admin";
 
 /** Continue the request (Vercel Routing Middleware pass-through). */
 function next(): Response {
@@ -12,6 +12,18 @@ function next(): Response {
 function hasCookie(header: string | null, name: string): boolean {
   if (header === null) return false;
   return new RegExp(`(?:^|;\\s*)${name}=`).test(header);
+}
+
+/** Map retired /desk bookmarks onto /admin. */
+function deskToAdmin(path: string): string {
+  if (path === "/desk" || path === "/desk/") return "/admin";
+  if (path === "/desk/login" || path.startsWith("/desk/login/")) return "/admin/login";
+  if (path === "/desk/queue" || path.startsWith("/desk/queue/")) return "/admin/loans";
+  if (path === "/desk/you" || path.startsWith("/desk/you/")) return "/admin/you";
+  const work = path.match(/^\/desk\/work\/([a-f0-9]{32})\/?$/);
+  if (work !== null) return `/admin/loans/${work[1]}`;
+  if (path === "/desk/work" || path.startsWith("/desk/work/")) return "/admin/loans";
+  return "/admin";
 }
 
 export default function middleware(request: Request): Response {
@@ -27,10 +39,14 @@ export default function middleware(request: Request): Response {
   const cookies = request.headers.get("cookie");
 
   if (path === "/desk" || path.startsWith("/desk/")) {
-    const login = path === "/desk/login" || path.startsWith("/desk/login/");
-    if (!login && !hasCookie(cookies, DESK)) {
+    return Response.redirect(new URL(deskToAdmin(path), url.origin), 302);
+  }
+
+  if (path === "/admin" || path.startsWith("/admin/")) {
+    const login = path === "/admin/login" || path.startsWith("/admin/login/");
+    if (!login && !hasCookie(cookies, ADMIN)) {
       const returnTo = encodeURIComponent(path);
-      return Response.redirect(new URL(`/desk/login?returnTo=${returnTo}`, url.origin), 302);
+      return Response.redirect(new URL(`/admin/login?returnTo=${returnTo}`, url.origin), 302);
     }
     return next();
   }

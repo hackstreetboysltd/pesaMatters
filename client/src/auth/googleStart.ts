@@ -1,13 +1,22 @@
 import { api, ApiError } from "../api";
-import { safeReturnTo } from "../returnTo";
+import { safeAdminReturnTo, safeReturnTo } from "../returnTo";
 
 const PENDING_KEY = "pesamatters.oauth";
+const ADMIN_PENDING_KEY = "pesamatters.admin.oauth";
+/** Must match server `ADMIN_OAUTH_STATE_PREFIX` so the shared Google callback hands off to /admin/login. */
+const ADMIN_OAUTH_STATE_PREFIX = "a.";
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 
 export type GooglePending = {
   state: string;
   verifier: string;
   returnTo: string;
+};
+
+export type GoogleConfigPayload = {
+  enabled: boolean;
+  clientId?: string;
+  redirectUri?: string;
 };
 
 const completingKeys = new Set<string>();
@@ -30,9 +39,10 @@ export async function s256Challenge(verifier: string): Promise<string> {
   return b64url(new Uint8Array(digest));
 }
 
-export async function newPkce(): Promise<{ state: string; verifier: string; challenge: string }> {
+export async function newPkce(statePrefix = ""): Promise<{ state: string; verifier: string; challenge: string }> {
   const verifier = b64url(randomBytes(32));
-  const state = Array.from(randomBytes(32), (b) => b.toString(16).padStart(2, "0")).join("");
+  const nonce = Array.from(randomBytes(32), (b) => b.toString(16).padStart(2, "0")).join("");
+  const state = `${statePrefix}${nonce}`;
   return { state, verifier, challenge: await s256Challenge(verifier) };
 }
 
@@ -62,18 +72,18 @@ export function claimOauthCompletion(state: string, code: string): boolean {
   return true;
 }
 
-export function storeGooglePending(pending: GooglePending): boolean {
+function storePending(key: string, pending: GooglePending): boolean {
   try {
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    sessionStorage.setItem(key, JSON.stringify(pending));
     return true;
   } catch {
     return false;
   }
 }
 
-export function readGooglePending(): GooglePending | null {
+function readPending(key: string, sanitize: (raw: string | null) => string): GooglePending | null {
   try {
-    const raw: unknown = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? "");
+    const raw: unknown = JSON.parse(sessionStorage.getItem(key) ?? "");
     if (raw === null || typeof raw !== "object") return null;
     const rec = raw as Record<string, unknown>;
     const state = rec["state"];
@@ -84,19 +94,43 @@ export function readGooglePending(): GooglePending | null {
     return {
       state,
       verifier,
-      returnTo: safeReturnTo(typeof returnTo === "string" ? returnTo : null),
+      returnTo: sanitize(typeof returnTo === "string" ? returnTo : null),
     };
   } catch {
     return null;
   }
 }
 
-export function clearGooglePending(): void {
+function clearPending(key: string): void {
   try {
-    sessionStorage.removeItem(PENDING_KEY);
+    sessionStorage.removeItem(key);
   } catch {
     /* private mode */
   }
+}
+
+export function storeGooglePending(pending: GooglePending): boolean {
+  return storePending(PENDING_KEY, pending);
+}
+
+export function readGooglePending(): GooglePending | null {
+  return readPending(PENDING_KEY, (raw) => safeReturnTo(raw));
+}
+
+export function clearGooglePending(): void {
+  clearPending(PENDING_KEY);
+}
+
+export function storeAdminGooglePending(pending: GooglePending): boolean {
+  return storePending(ADMIN_PENDING_KEY, pending);
+}
+
+export function readAdminGooglePending(): GooglePending | null {
+  return readPending(ADMIN_PENDING_KEY, (raw) => safeAdminReturnTo(raw));
+}
+
+export function clearAdminGooglePending(): void {
+  clearPending(ADMIN_PENDING_KEY);
 }
 
 /** True when the URL still carries an OAuth code handoff. Boot must not leave `/login` yet. */
@@ -116,20 +150,22 @@ export function leaveForGoogle(url: string): void {
   window.location.assign(url);
 }
 
-/**
- * Starts Google sign-in. The verifier stays in sessionStorage for this tab.
- * Google later redirects to the API, which only hands `code` and `state` back to `/login`.
- */
-export async function beginGoogleSignIn(returnTo: string): Promise<void> {
-  const cfg = await api.googleConfig();
+async function beginSignIn(opts: {
+  returnTo: string;
+  sanitize: (raw: string) => string;
+  store: (pending: GooglePending) => boolean;
+  loadConfig: () => Promise<GoogleConfigPayload>;
+  statePrefix?: string;
+}): Promise<void> {
+  const cfg = await opts.loadConfig();
   if (!cfg.enabled || cfg.clientId === undefined || cfg.redirectUri === undefined || cfg.clientId.length === 0) {
     throw new ApiError(503, "google_off", "Google sign-in needs a client id and secret in the server environment.");
   }
-  const pkce = await newPkce();
-  const stored = storeGooglePending({
+  const pkce = await newPkce(opts.statePrefix ?? "");
+  const stored = opts.store({
     state: pkce.state,
     verifier: pkce.verifier,
-    returnTo: safeReturnTo(returnTo),
+    returnTo: opts.sanitize(opts.returnTo),
   });
   if (!stored) {
     throw new ApiError(400, "google_state", "That sign-in expired. Try Continue with Google again.");
@@ -142,4 +178,31 @@ export async function beginGoogleSignIn(returnTo: string): Promise<void> {
       challenge: pkce.challenge,
     }),
   );
+}
+
+/**
+ * Starts Google sign-in. The verifier stays in sessionStorage for this tab.
+ * Google later redirects to the API, which only hands `code` and `state` back to `/login`.
+ */
+export async function beginGoogleSignIn(returnTo: string): Promise<void> {
+  await beginSignIn({
+    returnTo,
+    sanitize: (raw) => safeReturnTo(raw),
+    store: storeGooglePending,
+    loadConfig: () => api.googleConfig(),
+  });
+}
+
+/** Admin portal Google sign-in. Shared redirect URI; state prefix routes handoff to `/admin/login`. */
+export async function beginAdminGoogleSignIn(
+  returnTo: string,
+  loadConfig: () => Promise<GoogleConfigPayload>,
+): Promise<void> {
+  await beginSignIn({
+    returnTo,
+    sanitize: (raw) => safeAdminReturnTo(raw),
+    store: storeAdminGooglePending,
+    loadConfig,
+    statePrefix: ADMIN_OAUTH_STATE_PREFIX,
+  });
 }
