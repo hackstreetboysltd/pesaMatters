@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
 import { ApiError, api, type LoanApplication, type LoanMember, type LoanMine, type LoanProduct } from "../api";
 import { AmountField } from "../components/AmountField";
-import { BackLink } from "../components/BackLink";
 import { Dropdown } from "../components/Dropdown";
 import { KenyanPhoneField } from "../components/KenyanPhoneField";
 import { MarkCheck, MarkPlus, MarkTrash } from "../components/marks";
 import { Nav } from "../components/Nav";
 import { StepForm } from "../flow/StepForm";
-import { explainShillings, formatKes, formatShillingsTyping, shillingsToCents } from "../format";
+import { explainShillings, formatKes, formatPersonName, formatShillingsTyping, shillingsToCents } from "../format";
 import { isCompleteNational } from "../phone";
 import { repaymentCents } from "../repayment";
 import { useSession } from "../session";
@@ -130,7 +129,7 @@ export function Loans(): React.ReactElement {
   const [selfPercent, setSelfPercent] = useState("");
   const [others, setOthers] = useState<DraftGuarantee[]>([]);
   const [draftCents, setDraftCents] = useState(0);
-  const [crew, setCrew] = useState<LoanMember[]>([]);
+  const [group, setGroup] = useState<LoanMember[]>([]);
   const [pending, setPending] = useState(false);
   const [canAddGuarantor, setCanAddGuarantor] = useState(false);
 
@@ -157,10 +156,10 @@ export function Loans(): React.ReactElement {
     api
       .loans.members("")
       .then((payload) => {
-        if (active) setCrew(payload.members);
+        if (active) setGroup(payload.members);
       })
       .catch(() => {
-        if (active) setCrew([]);
+        if (active) setGroup([]);
       });
     return () => {
       active = false;
@@ -294,7 +293,6 @@ export function Loans(): React.ReactElement {
       <main className="screen" id="main">
         {(watching || finished) && application !== null ? (
           <header className="screen-head">
-            <BackLink to="/" label="Back to Pot" />
             <h1 className="screen-title">Loans</h1>
             <button className="icon-btn" type="button" onClick={() => setComposing(true)} aria-label="New loan">
               <MarkPlus />
@@ -308,7 +306,7 @@ export function Loans(): React.ReactElement {
             {mine.incoming.map((row) => (
               <div key={row.id} className="loan-line">
                 <p className="meta">
-                  {row.borrowerName} · {row.productName} · {formatKes(row.amountCents)}
+                  {formatPersonName(row.borrowerName)} · {row.productName} · {formatKes(row.amountCents)}
                 </p>
                 <span className="loan-actions">
                   <button className="ghost" type="button" disabled={pending} onClick={() => void answer(row.id, false)}>
@@ -325,7 +323,7 @@ export function Loans(): React.ReactElement {
         {(watching || finished) && application !== null ? (
           <DeskView
             application={application}
-            crew={crew}
+            group={group}
             pending={pending}
             onInvite={(memberId, cents) => void inviteMore(memberId, cents)}
           />
@@ -344,7 +342,6 @@ export function Loans(): React.ReactElement {
                     ? loanCap(null, amountCents, undefined, product.name)
                     : undefined
             }
-            {...(shownStep > 0 ? { onBack: () => setStep((value) => value - 1) } : {})}
             footer={
               shownStep === 0 ? (
                 <button className="primary" type="button" disabled={!detailsOk} onClick={() => setStep(1)}>
@@ -407,12 +404,12 @@ export function Loans(): React.ReactElement {
             {shownStep === 1 && amountCents !== null && member !== null ? (
               <GuarantorPicker
                 loanCents={amountCents}
-                selfName={member.name}
+                selfName={formatPersonName(member.name)}
                 selfFree={freeCents}
                 selfPercent={selfPercent}
                 selfShare={selfShare}
                 others={others}
-                crew={crew}
+                group={group}
                 minimumGuarantors={product?.minimumGuarantors ?? 0}
                 onSelfPercentChange={setSelfPercent}
                 onDraftCentsChange={setDraftCents}
@@ -446,7 +443,7 @@ export function Loans(): React.ReactElement {
                   </div>
                   {others.map((row) => (
                     <div key={row.memberId} className="loan-review-person">
-                      <span className="guarantor-who">{row.name}</span>
+                      <span className="guarantor-who">{formatPersonName(row.name)}</span>
                       <span className="guarantor-amt">{formatKes(row.amountCents)}</span>
                       <span className="guarantor-limit">{centsToPercent(amountCents, row.amountCents)}%</span>
                     </div>
@@ -474,7 +471,7 @@ function GuarantorPicker({
   selfPercent,
   selfShare,
   others,
-  crew,
+  group,
   minimumGuarantors,
   onSelfPercentChange,
   onDraftCentsChange,
@@ -490,7 +487,7 @@ function GuarantorPicker({
   selfPercent: string;
   selfShare: number;
   others: readonly DraftGuarantee[];
-  crew: readonly LoanMember[];
+  group: readonly LoanMember[];
   minimumGuarantors: number;
   onSelfPercentChange: (value: string) => void;
   onDraftCentsChange: (cents: number) => void;
@@ -508,15 +505,19 @@ function GuarantorPicker({
     selfPercent.trim() === "" ? "self" : null,
   );
   const [otherDrafts, setOtherDrafts] = useState<Record<string, string>>({});
-  const picked = crew.find((row) => row.id === pickedId) ?? null;
+  const picked = group.find((row) => row.id === pickedId) ?? null;
   const othersSum = others.reduce((sum, row) => sum + row.amountCents, 0);
   const room = Math.max(loanCents - selfShare - othersSum, 0);
   const draftCents = percentToCents(loanCents, percent);
   const selfReady = parsePercent(selfPercent) !== null && selfShare > 0;
   const draftReady = picked !== null && parsePercent(percent) !== null && draftCents > 0;
-  const options = crew
+  const options = group
     .filter((row) => !others.some((item) => item.memberId === row.id))
-    .map((row) => ({ value: row.id, label: row.name, hint: `${formatKes(row.freeCents)} free` }));
+    .map((row) => ({
+      value: row.id,
+      label: formatPersonName(row.name),
+      hint: `${formatKes(row.freeCents)} free`,
+    }));
 
   useEffect(() => {
     onDraftCentsChange(adding ? draftCents : 0);
@@ -562,9 +563,16 @@ function GuarantorPicker({
     if (share === null) return "Enter a percentage from 1 to 100.";
     const cents = Math.round((loanCents * share) / 100);
     if (cents <= 0) return "Enter a percentage from 1 to 100.";
-    if (cents > picked.freeCents) return `${picked.name} can guarantee up to ${formatKes(picked.freeCents)}.`;
+    if (cents > picked.freeCents) {
+      return `${formatPersonName(picked.name)} can guarantee up to ${formatKes(picked.freeCents)}.`;
+    }
     if (cents > room) return `That leaves the cover above the loan. Up to ${formatKes(room)} still open.`;
-    onAdd({ memberId: picked.id, name: picked.name, amountCents: cents, freeCents: picked.freeCents });
+    onAdd({
+      memberId: picked.id,
+      name: formatPersonName(picked.name),
+      amountCents: cents,
+      freeCents: picked.freeCents,
+    });
     setPickedId("");
     setPercent("");
     setAdding(false);
@@ -597,7 +605,7 @@ function GuarantorPicker({
       return;
     }
     if (cents > row.freeCents) {
-      setLocalError(`${row.name} can guarantee up to ${formatKes(row.freeCents)}.`);
+      setLocalError(`${formatPersonName(row.name)} can guarantee up to ${formatKes(row.freeCents)}.`);
       return;
     }
     const roomWithout = Math.max(loanCents - selfShare - (othersSum - row.amountCents), 0);
@@ -663,9 +671,9 @@ function GuarantorPicker({
         return (
           <GuarantorEntry
             key={row.memberId}
-            who={<div className="guarantor-locked">{row.name}</div>}
+            who={<div className="guarantor-locked">{formatPersonName(row.name)}</div>}
             percent={draft}
-            percentLabel={`${row.name} percentage`}
+            percentLabel={`${formatPersonName(row.name)} percentage`}
             editing={editingKey === row.memberId}
             onPercentFocus={() => setEditingKey(row.memberId)}
             onPercentChange={(value) => {
@@ -780,12 +788,12 @@ function GuarantorEntry({
 
 function DeskView({
   application,
-  crew,
+  group,
   pending,
   onInvite,
 }: {
   application: LoanApplication;
-  crew: readonly LoanMember[];
+  group: readonly LoanMember[];
   pending: boolean;
   onInvite: (memberId: string, amountCents: number) => void;
 }): React.ReactElement {
@@ -796,7 +804,7 @@ function DeskView({
   const taken = new Set(application.guarantors.filter((row) => row.status === "accepted" || row.status === "invited").map((row) => row.memberId));
   const [pickedId, setPickedId] = useState("");
   const [pledge, setPledge] = useState("");
-  const picked = crew.find((row) => row.id === pickedId) ?? null;
+  const picked = group.find((row) => row.id === pickedId) ?? null;
 
   return (
     <article className="loan-record">
@@ -807,7 +815,7 @@ function DeskView({
         <div className="loan-record-people">
           {application.guarantors.map((row) => (
             <div key={row.id} className="loan-record-person">
-              <span className="guarantor-who">{row.name}</span>
+              <span className="guarantor-who">{formatPersonName(row.name)}</span>
               <span className="guarantor-amt">{formatKes(row.amountCents)}</span>
               <span className="guarantor-limit">{row.status}</span>
             </div>
@@ -831,13 +839,17 @@ function DeskView({
           <div className="field">
             <span>Member</span>
             <Dropdown
-              options={crew
+              options={group
                 .filter((row) => !taken.has(row.id))
-                .map((row) => ({ value: row.id, label: row.name, hint: `${formatKes(row.freeCents)} free` }))}
+                .map((row) => ({
+                  value: row.id,
+                  label: formatPersonName(row.name),
+                  hint: `${formatKes(row.freeCents)} free`,
+                }))}
               value={pickedId}
               listLabel="Members"
               onChange={(next) => {
-                const person = crew.find((row) => row.id === next);
+                const person = group.find((row) => row.id === next);
                 setPickedId(next);
                 if (person === undefined) return;
                 setPledge(shillingsField(Math.min(person.freeCents, gap)));
@@ -846,7 +858,7 @@ function DeskView({
           </div>
           {picked !== null ? (
             <p className="meta">
-              {picked.name} can guarantee up to {formatKes(picked.freeCents)}.
+              {formatPersonName(picked.name)} can guarantee up to {formatKes(picked.freeCents)}.
             </p>
           ) : null}
           <AmountField label="Their share" value={pledge} onChange={setPledge} />

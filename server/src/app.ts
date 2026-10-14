@@ -19,6 +19,7 @@ import { B2cResultBody, receiptFromB2c, receiptFromStk, StkCallbackBody } from "
 import { kenyanMsisdn } from "./mpesa/phone.ts";
 import { registerAdminRoutes } from "./admin/http.ts";
 import { registerMemberLoanRoutes } from "./loans/http.ts";
+import { ProductError } from "./loans/products.ts";
 import { ensureGoogleAdmins, LoanError, seedLoanProducts } from "./loans/service.ts";
 import { PaymentError, applyDarajaResult, checkPayment, receiptFile, receiptFor, startPayment } from "./payments.ts";
 import {
@@ -30,6 +31,7 @@ import {
   type QuoteSource,
 } from "./quotes.ts";
 import { createRateLimiter } from "./ratelimit.ts";
+import { ensureRealTime, realNowDate } from "./realTime.ts";
 import { refreshCloses } from "./closes.ts";
 import { nseShares } from "./symbols.ts";
 import {
@@ -47,7 +49,6 @@ import {
   memberFromToken,
   newCsrfToken,
   openSession,
-  seedCrew,
   verifyStoredChain,
   type Member,
 } from "./store.ts";
@@ -67,7 +68,7 @@ const GOOGLE_FAIL: Record<string, { status: number; message: string }> = {
     message: "Google sign-in needs a client id and secret in the server environment.",
   },
   google_state: { status: 400, message: "That sign-in expired. Try Continue with Google again." },
-  google_network: { status: 502, message: "Could not reach Google. Check the network, then try again." },
+  google_network: { status: 502, message: "Could not reach Google. Check the network or pause the VPN, then try again." },
   google_clock: {
     status: 409,
     message: "This device's clock is wrong. Set the correct date and time, then try again.",
@@ -214,7 +215,7 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       res.setHeader("Access-Control-Allow-Origin", config.appOrigin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
       res.setHeader("Vary", "Origin");
     }
     if (req.method === "OPTIONS") {
@@ -224,6 +225,16 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
     next();
   });
   app.use(express.json({ limit: "32kb" }));
+
+  app.use((req, _res, next) => {
+    if (req.path === "/api/health" || MPESA_CALLBACKS.has(req.path)) {
+      next();
+      return;
+    }
+    void ensureRealTime()
+      .then(() => next())
+      .catch(next);
+  });
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
@@ -253,7 +264,6 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       }
       await applySchema(pool);
       await ensureGenesis(pool);
-      await seedCrew(pool, config.seedPassword);
       await seedLoanProducts(pool);
       await ensureGoogleAdmins(pool, config.adminGoogleEmails);
       res.json({ ok: true, bootstrapped: true });
@@ -261,6 +271,11 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
   );
 
   app.get("/api/auth/csrf", (req, res) => {
+    // A 304 (Express ETag) drops Set-Cookie, so the next POST fails as csrf.
+    delete req.headers["if-none-match"];
+    delete req.headers["if-modified-since"];
+    res.setHeader("Cache-Control", "private, no-store, no-cache, max-age=0");
+    res.setHeader("Pragma", "no-cache");
     const cookies = cookiesOf(req);
     const current = cookies[CSRF];
     const token = current !== undefined && current.length > 10 ? current : newCsrfToken();
@@ -424,7 +439,7 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
     }),
   );
 
-  registerAdminRoutes(app, pool, config, limiter, rails);
+  registerAdminRoutes(app, pool, config, limiter, rails, quotes);
 
   app.use((req, _res, next) => {
     if (req.path.startsWith("/api/admin")) {
@@ -675,7 +690,7 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       res.status(error.status).json({ error: { code: error.code, message: error.message } });
       return;
     }
-    if (error instanceof PaymentError || error instanceof LoanError) {
+    if (error instanceof PaymentError || error instanceof LoanError || error instanceof ProductError) {
       res.status(error.status).json({ error: { code: error.code, message: error.message } });
       return;
     }
@@ -706,7 +721,7 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
 
 async function loadQuote(quotes: QuoteSource, symbol: string, fresh: boolean): Promise<CloseQuote> {
   try {
-    return await quotes.load(symbol, nairobiDate(new Date()), fresh);
+    return await quotes.load(symbol, nairobiDate(realNowDate()), fresh);
   } catch (error) {
     if (error instanceof QuoteError) {
       const status = error.code === "bad_symbol" ? 422 : error.code === "unknown_symbol" ? 404 : 502;

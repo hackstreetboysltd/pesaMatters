@@ -24,7 +24,7 @@ const ERRORS: Record<string, string> = {
   google_rejected: "Google rejected that sign-in. Reload the page and try again.",
   google_client: "Google rejected the client secret. Check it in the server environment and restart the API.",
   google_redirect: "The Google redirect address does not match this app.",
-  google_network: "Could not reach Google. Check the network, then try again.",
+  google_network: "Could not reach Google. Check the network or pause the VPN, then try again.",
   google_clock: "This device's clock is wrong. Set the correct date and time, then try again.",
   google_conflict: "That Google email is already tied to another account.",
   email_unverified: "That Google account has not verified its email.",

@@ -33,7 +33,7 @@ export function StepForm({
       <header className="step-head">
         {showProgress ? (
           <div className="step-progress-row">
-            {onBack !== undefined && step > 0 ? (
+            {onBack !== undefined ? (
               <button type="button" className="back-link step-back" aria-label="Back" onClick={onBack}>
                 <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M19 12H5" />

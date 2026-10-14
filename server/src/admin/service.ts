@@ -1,10 +1,10 @@
 import type { Db, Row } from "../db.ts";
 import { listInvestments, listMembers, verifyStoredChain, type InvestmentView, type Member } from "../store.ts";
 import { listQueue, type ApplicationView } from "../loans/service.ts";
-import { LOAN_PRODUCTS, type LoanProduct } from "../loans/products.ts";
+import { listProducts, type LoanProduct } from "../loans/products.ts";
 
 export type AdminOverview = {
-  crewCount: number;
+  groupCount: number;
   cashCents: number;
   pendingPayments: number;
   failedPaymentsWeek: number;
@@ -13,7 +13,7 @@ export type AdminOverview = {
   health: "live" | "degraded";
 };
 
-export type CrewRow = {
+export type GroupRow = {
   id: string;
   name: string;
   email: string;
@@ -35,6 +35,7 @@ export type PaymentRow = {
   amountCents: number;
   status: string;
   createdAt: string;
+  awaitingApproval: boolean;
 };
 
 /** Pure: pick live vs degraded from ledger + payment pressure. */
@@ -50,7 +51,7 @@ export function adminHealthOf(input: {
 }
 
 export async function loadOverview(pool: Db): Promise<AdminOverview> {
-  const [[crew], [cashRows], [pending], [failed], [openLoans], ledger] = await Promise.all([
+  const [[group], [cashRows], [pending], [failed], [openLoans], ledger] = await Promise.all([
     pool.query<Row>("SELECT COUNT(*)::int AS n FROM members"),
     pool.query<Row>("SELECT cash_cents FROM treasury WHERE id = 1 LIMIT 1"),
     pool.query<Row>("SELECT COUNT(*)::int AS n FROM payments WHERE status IN ('pending', 'settling')"),
@@ -64,14 +65,14 @@ export async function loadOverview(pool: Db): Promise<AdminOverview> {
     ),
     verifyStoredChain(pool),
   ]);
-  const crewCount = Number(crew[0]?.["n"] ?? 0);
+  const groupCount = Number(group[0]?.["n"] ?? 0);
   const cashCents = Number(cashRows[0]?.["cash_cents"] ?? 0);
   const pendingPayments = Number(pending[0]?.["n"] ?? 0);
   const failedPaymentsWeek = Number(failed[0]?.["n"] ?? 0);
   const open = Number(openLoans[0]?.["n"] ?? 0);
   const ledgerOk = ledger.ok;
   return {
-    crewCount,
+    groupCount,
     cashCents,
     pendingPayments,
     failedPaymentsWeek,
@@ -81,7 +82,7 @@ export async function loadOverview(pool: Db): Promise<AdminOverview> {
   };
 }
 
-export async function loadCrew(pool: Db): Promise<CrewRow[]> {
+export async function loadGroup(pool: Db): Promise<GroupRow[]> {
   const members = await listMembers(pool);
   const [claims] = await pool.query<Row>("SELECT member_id, claim_cents FROM claims");
   const byId = new Map<string, number>();
@@ -121,22 +122,28 @@ export async function loadTreasury(pool: Db): Promise<TreasurySnapshot> {
 export async function loadPayments(pool: Db, limit: number): Promise<PaymentRow[]> {
   const capped = Math.min(Math.max(limit, 1), 100);
   const [rows] = await pool.query<Row>(
-    `SELECT p.id, p.member_id, p.kind, p.amount_cents, p.status, p.created_at, m.name AS member_name
+    `SELECT p.id, p.member_id, p.kind, p.amount_cents, p.status, p.checkout_request_id, p.created_at, m.name AS member_name
      FROM payments p
      JOIN members m ON m.id = p.member_id
      ORDER BY p.created_at DESC
      LIMIT ?`,
     [capped],
   );
-  return rows.map((row) => ({
-    id: String(row["id"]),
-    memberId: String(row["member_id"]),
-    memberName: String(row["member_name"]),
-    kind: String(row["kind"]),
-    amountCents: Number(row["amount_cents"]),
-    status: String(row["status"]),
-    createdAt: toIso(row["created_at"]),
-  }));
+  return rows.map((row) => {
+    const kind = String(row["kind"]);
+    const status = String(row["status"]);
+    const checkout = row["checkout_request_id"];
+    return {
+      id: String(row["id"]),
+      memberId: String(row["member_id"]),
+      memberName: String(row["member_name"]),
+      kind,
+      amountCents: Number(row["amount_cents"]),
+      status,
+      createdAt: toIso(row["created_at"]),
+      awaitingApproval: kind === "withdraw" && status === "pending" && checkout === null,
+    };
+  });
 }
 
 export async function loadAdminInvestments(pool: Db): Promise<InvestmentView[]> {
@@ -147,8 +154,8 @@ export async function loadAdminLoans(pool: Db): Promise<ApplicationView[]> {
   return listQueue(pool);
 }
 
-export function loadProducts(): readonly LoanProduct[] {
-  return LOAN_PRODUCTS;
+export async function loadProducts(pool: Db): Promise<readonly LoanProduct[]> {
+  return listProducts(pool);
 }
 
 function toIso(value: unknown): string {

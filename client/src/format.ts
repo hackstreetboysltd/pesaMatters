@@ -1,3 +1,13 @@
+/** Person names for display: "BUNYASI PHIL KAKAI" → "Bunyasi Phil Kakai". */
+export function formatPersonName(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toLocaleUpperCase("en") + part.slice(1).toLocaleLowerCase("en"))
+    .join(" ");
+}
+
 export function formatUsd(cents: number): string {
   const amount = new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,

@@ -7,7 +7,7 @@
     { "source": "/desk", "destination": "/admin", "permanent": false },
     { "source": "/desk/login", "destination": "/admin/login", "permanent": false },
     { "source": "/desk/queue", "destination": "/admin/loans", "permanent": false },
-    { "source": "/desk/you", "destination": "/admin/you", "permanent": false },
+    { "source": "/desk/you", "destination": "/admin", "permanent": false },
     { "source": "/desk/work/:id", "destination": "/admin/loans/:id", "permanent": false },
     { "source": "/desk/work", "destination": "/admin/loans", "permanent": false },
     { "source": "/desk/:path*", "destination": "/admin", "permanent": false }

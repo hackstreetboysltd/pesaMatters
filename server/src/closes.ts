@@ -1,6 +1,7 @@
 import type { Db } from "./db.ts";
 import { log } from "./logger.ts";
 import { QuoteError, msUntilNextCloseTick, nairobiDate, type QuoteSource } from "./quotes.ts";
+import { realNowDate } from "./realTime.ts";
 import { appendEntry, listInvestments } from "./store.ts";
 
 export type RefreshResult = {
@@ -14,7 +15,7 @@ export type RefreshResult = {
  * A price change goes through the ledger. A prior-close fill that does not
  * move the price is display data only.
  */
-export async function refreshCloses(pool: Db, source: QuoteSource, now = new Date()): Promise<RefreshResult> {
+export async function refreshCloses(pool: Db, source: QuoteSource, now = realNowDate()): Promise<RefreshResult> {
   const today = nairobiDate(now);
   const holdings = await listInvestments(pool);
   const seen = new Map<string, Awaited<ReturnType<QuoteSource["load"]>>>();
@@ -78,7 +79,7 @@ export function startCloseScheduler(pool: Db, source: QuoteSource): () => void {
 
   const arm = (): void => {
     if (stopped) return;
-    const wait = msUntilNextCloseTick(new Date());
+    const wait = msUntilNextCloseTick(realNowDate());
     timer = setTimeout(() => {
       void refreshCloses(pool, source)
         .catch((error: unknown) => {

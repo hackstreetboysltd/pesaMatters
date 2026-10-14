@@ -1,3 +1,4 @@
+import "./net.ts";
 import dotenv from "dotenv";
 import { resolve } from "node:path";
 import { createApp } from "./app.ts";
@@ -6,6 +7,7 @@ import { loadConfig } from "./config.ts";
 import { createPool } from "./db.ts";
 import { log } from "./logger.ts";
 import { createQuoteSource } from "./quotes.ts";
+import { syncRealTime } from "./realTime.ts";
 
 dotenv.config({ path: resolve(process.cwd(), "../.env") });
 dotenv.config({ path: resolve(process.cwd(), ".env") });
@@ -17,6 +19,7 @@ const app = createApp(pool, config, quotes);
 
 async function boot(): Promise<void> {
   await pool.query("SELECT 1 AS ok");
+  await syncRealTime();
   const stopCloses = startCloseScheduler(pool, quotes);
   const server = app.listen(config.port, () => {
     log.info("listening", { port: config.port });

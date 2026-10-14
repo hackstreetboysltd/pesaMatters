@@ -21,6 +21,7 @@ import {
 } from "./money.ts";
 import { hashPassword } from "./passwords.ts";
 import { dayChangeBps } from "./quotes.ts";
+import { realNowDate, realNowMs } from "./realTime.ts";
 
 const LOCK = "hackstreet_ledger";
 
@@ -214,7 +215,7 @@ export async function appendEntry(
   pool: Db,
   entryType: string,
   payload: Payload,
-  createdAt = new Date(),
+  createdAt = realNowDate(),
 ): Promise<PublicBlock> {
   if (!isEntryType(entryType) || entryType === "genesis") {
     throw new Error("Refusing to append that entry type");
@@ -258,7 +259,7 @@ export async function createMember(
   const id = randomBytes(16).toString("hex");
   // Google accounts have no password. The stored marker is not a scrypt hash, so it cannot pass verification.
   const passwordHash = input.password === undefined ? "google" : await hashPassword(input.password);
-  const createdAt = new Date();
+  const createdAt = realNowDate();
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -347,7 +348,7 @@ export async function findMemberByEmail(
 export async function openSession(pool: Db, memberId: string): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  const expires = new Date(Date.now() + 1000 * 60 * 60 * 12);
+  const expires = new Date(realNowMs() + 1000 * 60 * 60 * 12);
   await pool.query(
     "INSERT INTO sessions (token_hash, member_id, expires_at) VALUES (?, ?, ?)",
     [tokenHash, memberId, expires.toISOString()],
@@ -556,7 +557,7 @@ function describe(
     return {
       id: block.id,
       at: block.createdAt,
-      text: `Crew bought ${symbol}`,
+      text: `Group bought ${symbol}`,
       amountCents: null,
       direction: "neutral",
     };
@@ -665,76 +666,6 @@ function nullableDate(value: unknown): string | null {
 function dayMove(priorCents: number | null, latestCents: number): number | null {
   if (priorCents === null) return null;
   return dayChangeBps(priorCents, latestCents);
-}
-
-export async function seedCrew(pool: Db, password: string): Promise<void> {
-  const [existing] = await pool.query<Row>("SELECT id FROM members LIMIT 1");
-  if (existing.length > 0) return;
-  const crew = [
-    { name: "Kakai", email: "kakai@hackstreet.local" },
-    { name: "Alvin", email: "alvin@hackstreet.local" },
-    { name: "Amina", email: "amina@hackstreet.local" },
-    { name: "Brian", email: "brian@hackstreet.local" },
-  ];
-  const members: Member[] = [];
-  for (const person of crew) {
-    members.push(await createMember(pool, { ...person, password }));
-  }
-  const byName = new Map(members.map((member) => [member.name, member.id]));
-  const kakai = byName.get("Kakai");
-  const alvin = byName.get("Alvin");
-  const amina = byName.get("Amina");
-  const brian = byName.get("Brian");
-  if (!kakai || !alvin || !amina || !brian) return;
-  const day = (iso: string): Date => new Date(iso);
-  await appendEntry(pool, "deposit", { memberId: kakai, amountCents: 2_000_000 }, day("2026-02-02T08:00:00.000Z"));
-  await appendEntry(pool, "deposit", { memberId: alvin, amountCents: 1_500_000 }, day("2026-02-03T08:00:00.000Z"));
-  await appendEntry(pool, "deposit", { memberId: amina, amountCents: 1_000_000 }, day("2026-02-04T08:00:00.000Z"));
-  await appendEntry(pool, "deposit", { memberId: brian, amountCents: 800_000 }, day("2026-02-05T08:00:00.000Z"));
-  await appendEntry(
-    pool,
-    "transfer",
-    { memberId: kakai, counterpartyId: alvin, amountCents: 50_000 },
-    day("2026-02-12T15:10:00.000Z"),
-  );
-  const scom = randomBytes(16).toString("hex");
-  const kcb = randomBytes(16).toString("hex");
-  await appendEntry(
-    pool,
-    "invest",
-    {
-      investmentId: scom,
-      memberId: kakai,
-      symbol: "SCOM",
-      name: "Safaricom",
-      unitsMicro: 200_000_000,
-      priceCents: 1_850,
-    },
-    day("2026-03-02T09:00:00.000Z"),
-  );
-  await appendEntry(
-    pool,
-    "invest",
-    {
-      investmentId: kcb,
-      memberId: kakai,
-      symbol: "KCB",
-      name: "KCB Group",
-      unitsMicro: 100_000_000,
-      priceCents: 4_200,
-    },
-    day("2026-03-04T09:00:00.000Z"),
-  );
-  const scomMarks = [1_920, 1_880, 2_010, 2_140, 2_090, 2_260];
-  const kcbMarks = [4_150, 4_080, 4_220, 4_050, 3_980, 4_010];
-  for (let i = 0; i < scomMarks.length; i += 1) {
-    const price = scomMarks[i];
-    const kcbPrice = kcbMarks[i];
-    if (price === undefined || kcbPrice === undefined) continue;
-    const at = new Date(Date.UTC(2026, 3, 2 + i * 12, 10, 0, 0));
-    await appendEntry(pool, "mark", { investmentId: scom, priceCents: price }, at);
-    await appendEntry(pool, "mark", { investmentId: kcb, priceCents: kcbPrice }, new Date(at.getTime() + 60_000));
-  }
 }
 
 export function newCsrfToken(): string {

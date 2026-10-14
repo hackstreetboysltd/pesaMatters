@@ -46,23 +46,6 @@ export type Investment = {
   dayChangeBps: number | null;
 };
 
-export type CloseQuote = {
-  symbol: string;
-  name: string;
-  closeCents: number;
-  closeSession: string;
-  priorCloseCents: number | null;
-  priorSession: string | null;
-  dayChangeBps: number | null;
-  listedCloseCents: number | null;
-  fxKesPerUsd: number | null;
-};
-
-export type ListedShare = {
-  symbol: string;
-  name: string;
-};
-
 export type InvestmentDetail = Investment & {
   marks: { at: string; priceCents: number }[];
 };
@@ -79,6 +62,7 @@ export type Receipt = {
   receiptNumber: string | null;
   actorName: string;
   counterpartyName: string | null;
+  awaitingApproval: boolean;
 };
 
 export type LoanProduct = {
@@ -164,7 +148,7 @@ function readCookie(name: string): string | null {
 async function ensureCsrf(): Promise<string> {
   const existing = readCookie("hs_csrf");
   if (existing !== null) return existing;
-  const response = await fetch("/api/auth/csrf", { credentials: "include" });
+  const response = await fetch("/api/auth/csrf", { credentials: "include", cache: "no-store" });
   if (!response.ok) {
     throw new ApiError(response.status, "csrf", "Could not start a secure session.");
   }
@@ -200,7 +184,7 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
       body: init.body === undefined ? null : JSON.stringify(init.body),
     });
   } catch {
-    throw new ApiError(0, "network", "The crew pot is unreachable. Check that the app is running.");
+    throw new ApiError(0, "network", "The group pot is unreachable. Check that the app is running.");
   }
   if (response.status === 401) {
     // /api/me is the session probe — let SessionProvider decide. Everything else forces login.
@@ -260,10 +244,6 @@ export const api = {
     request<{ investment: InvestmentDetail; brokerage: { venue: string; mode: string; note: string } }>(
       `/api/investments/${id}`,
     ),
-  symbols: () => request<{ symbols: ListedShare[] }>("/api/symbols"),
-  quote: (symbol: string) => request<CloseQuote>(`/api/quotes/${encodeURIComponent(symbol)}`),
-  buy: (input: { symbol: string; name: string; units: number }) =>
-    request<{ id: string }>("/api/investments", { method: "POST", body: input }),
   loans: {
     mine: () => request<LoanMine>("/api/loans/mine"),
     members: (q: string) => request<{ members: LoanMember[] }>(`/api/loans/members?q=${encodeURIComponent(q)}`),

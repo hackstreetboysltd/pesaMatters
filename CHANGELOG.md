@@ -1,10 +1,47 @@
 # Changelog
 
+## 2026-10-07
+
+### Added
+
+- Admin Ledger lists every block (with hashes and verify walk), not only the intact/broken status line.
+
+### Changed
+
+- Admin dashboard Home is module tiles (icon + label) instead of overview stat cards.
+- Admin Money tabs: Treasury → **Balances**, Payments → **In/Out**. Invest is its own bottom-nav module at `/admin/invest` (old `?lane=invest` redirects).
+- Admin Money **In/Out** is now **Deposits** and **Draws** (`?lane=deposits`, `?lane=draws`; old `?lane=payments` opens Deposits).
+
+## 2026-10-06
+
+### Added
+
+- Pot shows a centered **Deposit** button under the bowl; it opens Transact on Deposit with the amount field focused.
+
+### Changed
+
+- Member money flow renamed: **Move** → **Transact** (`/transact`, `/move` redirects), **Add** → **Deposit**, **Out** → **Draw** (UI, receipts, and PDF labels).
+
+### Removed
+
+- Member portal no longer shows the Invest buy (`+`) control or the ledger book on Pot and Transact. Buying holdings and the full ledger stay on Admin.
+- Demo group seed (four `@hackstreet.local` members, sample deposits, transfers, and NSE marks). Seed now only ensures the genesis block, loan product catalogue defaults, and Google admins. `SEED_PASSWORD` is no longer required.
+
+### Fixed
+
+- Google cert and token fetches retry three times (10s each, linear backoff) so transient VPN/IPv6 egress blips do not abort member or admin sign-in as `google_network`.
+
 ## 2026-10-05
+
+### Added
+
+- Admin can create and edit loan products (Products lane `+` / tap-to-edit sheet). Catalogue is DB-backed; seed only inserts missing codes.
+- Admin can buy investments from Money → Invest (`+` sheet) and open holding detail. Symbols, quotes, and buy are admin-authenticated.
 
 ### Changed
 
 - Ops moved from the retired Desk SPA to **Admin** at `/admin` with Google-only sign-in (`ADMIN_GOOGLE_EMAILS`). Bookmark paths under `/desk` redirect to `/admin`. Session cookie is `hs_admin`; session rows live in `admin_sessions`.
+- Admin Money and Loans lane tabs are centered like member Profile tabs.
 
 ### Removed
 
@@ -12,6 +49,8 @@
 
 ### Fixed
 
+- API timestamps and Daraja Nairobi time follow network UTC when the host clock is wrong (internal-app realTime pattern).
+- API DNS prefers IPv4 so Google sign-in does not fail as `google_network` on hosts with broken IPv6.
 - `./start.sh` no longer reports a Docker-published port (e.g. **5433**) as free when `ss -p` omits PIDs. It detects LISTEN state, stops containers that publish the port, then kills host listeners before starting Postgres.
 - `./start.sh` no longer treats a healthy compose DB as ready when the host port is unpublished (`NetworkSettings.Ports={}`). It recreates the container and waits until `127.0.0.1:POSTGRES_PORT` accepts connections before migrate/seed.
 
@@ -42,7 +81,7 @@
 - Home shows **My Goal** above the pot. Enter a target once; it then displays as `KES …` in the ledger font. Tap the figure to edit again. Money amount fields (goal and Move) share live thousand commas and amount-in-words. A green check to the right of the goal field saves it and stays aligned with the bottom line when the amount wraps. The orange fill is claim ÷ goal (full bowl = goal met). The Move pot uses the same fill. Pot and Move snap the level on load — no breathing or fill spring.
 - Invest lists holdings only. A plus in the top right opens the buy page.
 - The buy share menu lists NSE names Kingdom Securities can trade, ten at a time, with search and previous / next. Tickers stay off the menu; the company name is enough.
-- That menu is the app dropdown. Rows are centered, and it has no placeholder. Send on Move uses it for the crew list.
+- That menu is the app dropdown. Rows are centered, and it has no placeholder. Send on Move uses it for the group list.
 - A buy stores the date, the shares, the shillings spent, and the last published Nairobi close. At 00:01 Africa/Nairobi the day move updates from the free NSE pages, green for a gain and red for a loss.
 
 ### Fixed
@@ -76,11 +115,11 @@
 
 ### Changed
 
-- Sign-in is Continue with Google. Email and password login and self-serve password registration are gone. A verified Google account joins the crew or resumes the member with that email.
+- Sign-in is Continue with Google. Email and password login and self-serve password registration are gone. A verified Google account joins the group or resumes the member with that email.
 
 ### Added
 
 - `./start.sh` frees the Vite, API, and (when needed) Postgres ports, starts the local stack, waits until healthy, and opens the app in the browser.
-- Hackstreet PesaMatters: a React and Express crew pot on Postgres, with a hash-linked ledger for deposits, withdrawals, member transfers, and investment marks.
+- Hackstreet PesaMatters: a React and Express group pot on Postgres, with a hash-linked ledger for deposits, withdrawals, member transfers, and investment marks.
 - Phone-first pot screen, move, investments with a price path, a full ledger, and a profile with per-device System / Light / Dark.
 - Sandbox Kingdom Securities labeling. Broker credentials are not collected or stored.

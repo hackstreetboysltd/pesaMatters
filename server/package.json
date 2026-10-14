@@ -8,7 +8,7 @@
     "db:migrate": "node --experimental-strip-types scripts/migrate.ts",
     "db:seed": "node --experimental-strip-types scripts/seed.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test test/ledger.test.ts test/google.test.ts test/returnTo.test.ts test/quotes.test.ts test/mpesa.test.ts test/config.test.ts test/loans.test.ts test/admin-auth.test.ts test/admin-overview.test.ts"
+    "test": "node --experimental-strip-types --test test/ledger.test.ts test/google.test.ts test/returnTo.test.ts test/quotes.test.ts test/mpesa.test.ts test/config.test.ts test/loans.test.ts test/admin-auth.test.ts test/admin-overview.test.ts test/realTime.test.ts test/admin-products-invest.test.ts test/csrf-cache.test.ts"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.5",

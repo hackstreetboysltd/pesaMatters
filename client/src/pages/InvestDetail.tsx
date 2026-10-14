@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ApiError, api, type InvestmentDetail } from "../api";
-import { BackLink } from "../components/BackLink";
 import { Nav } from "../components/Nav";
 import { formatDayPercent, formatKes, formatNairobiDay, formatSession, formatUnits, formatWhen } from "../format";
 
@@ -34,7 +33,6 @@ export function InvestDetail(): React.ReactElement {
     <>
       <main className="screen" id="main">
         <header className="screen-head">
-          <BackLink to="/invest" label="Back to Investments" />
           <h1 className="screen-title">{row?.name ?? "Investment"}</h1>
         </header>
         {error !== null ? (

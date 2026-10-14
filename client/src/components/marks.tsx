@@ -99,7 +99,7 @@ export function MarkHome(): ReactElement {
   );
 }
 
-export function MarkCrew(): ReactElement {
+export function MarkGroup(): ReactElement {
   return (
     <Mark>
       <circle cx="9" cy="9" r="2.2" {...stroke} />

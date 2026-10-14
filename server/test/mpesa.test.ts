@@ -63,7 +63,7 @@ test("receipt number is the first 12 digits of the ledger hash", () => {
 test("receipt pdf is a one-page document", () => {
   const hash = "ab12cd34ef567890".padEnd(64, "a");
   const file = receiptPdf({
-    kind: "Add",
+    kind: "Deposit",
     amount: "KES 200",
     from: "Phil Kakai",
     to: null,

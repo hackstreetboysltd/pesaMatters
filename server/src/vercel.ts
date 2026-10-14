@@ -1,3 +1,4 @@
+import "./net.ts";
 import { resolve } from "node:path";
 import dotenv from "dotenv";
 import { createApp } from "./app.ts";

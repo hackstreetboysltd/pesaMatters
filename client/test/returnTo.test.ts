@@ -8,7 +8,7 @@ test("safeReturnTo rejects admin login loops", () => {
 });
 
 test("safeAdminReturnTo strips the /admin basename", () => {
-  assert.equal(safeAdminReturnTo("/admin/crew"), "/crew");
+  assert.equal(safeAdminReturnTo("/admin/group"), "/group");
   assert.equal(safeAdminReturnTo("/admin"), "/");
   assert.equal(safeAdminReturnTo("/money"), "/money");
   assert.equal(safeAdminReturnTo("/admin/login"), "/");

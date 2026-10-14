@@ -45,7 +45,7 @@ export function marketValueCents(state: MoneyState): number {
 function requireMember(state: MoneyState, memberId: string): number {
   const claim = state.claims[memberId];
   if (claim === undefined) {
-    throw new MoneyError("unknown_member", "That member is not in the crew.");
+    throw new MoneyError("unknown_member", "That member is not in the group.");
   }
   return claim;
 }

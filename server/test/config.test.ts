@@ -5,7 +5,6 @@ import { loadConfig } from "../src/config.ts";
 function baseEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return {
     DATABASE_URL: "postgres://pesamatters:secret@127.0.0.1:5433/pesamatters",
-    SEED_PASSWORD: "replace-with-at-least-10-chars",
     APP_ORIGIN: "http://127.0.0.1:5173",
     COOKIE_SECURE: "false",
     MPESA_MODE: "mock",

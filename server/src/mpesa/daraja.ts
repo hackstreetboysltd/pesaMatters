@@ -1,6 +1,8 @@
 /** Daraja STK helpers. Timestamps use the Africa/Nairobi clock Safaricom hashes. */
 
-export function darajaTimestamp(now: Date = new Date()): string {
+import { realNowDate } from "../realTime.ts";
+
+export function darajaTimestamp(now: Date = realNowDate()): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Africa/Nairobi",
     year: "numeric",

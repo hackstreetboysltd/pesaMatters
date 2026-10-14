@@ -1,4 +1,5 @@
 import type { MpesaLive } from "../config.ts";
+import { realNowMs } from "../realTime.ts";
 import {
   darajaPassword,
   darajaTimestamp,
@@ -72,7 +73,7 @@ export function liveRails(creds: MpesaLive): Rails {
   let cached: { token: string; expMs: number } | undefined;
 
   async function accessToken(): Promise<string> {
-    if (cached !== undefined && Date.now() < cached.expMs) return cached.token;
+    if (cached !== undefined && realNowMs() < cached.expMs) return cached.token;
     const tokenRes = await fetch(`${baseUrl(creds.env)}/oauth/v1/generate?grant_type=client_credentials`, {
       headers: {
         Authorization: `Basic ${Buffer.from(`${creds.consumerKey}:${creds.consumerSecret}`).toString("base64")}`,
@@ -82,7 +83,7 @@ export function liveRails(creds: MpesaLive): Rails {
     const tokenJson = await readJson(tokenRes);
     if (!tokenRes.ok) throw new Error("mpesa_token_failed");
     const parsed = parseAccessToken(tokenJson);
-    cached = { token: parsed.accessToken, expMs: Date.now() + Math.max(30, parsed.expiresInSec - 60) * 1000 };
+    cached = { token: parsed.accessToken, expMs: realNowMs() + Math.max(30, parsed.expiresInSec - 60) * 1000 };
     return parsed.accessToken;
   }
 

@@ -9,7 +9,7 @@ function deskToAdmin(path: string): string {
   if (path === "/desk" || path === "/desk/") return "/admin";
   if (path === "/desk/login" || path.startsWith("/desk/login/")) return "/admin/login";
   if (path === "/desk/queue" || path.startsWith("/desk/queue/")) return "/admin/loans";
-  if (path === "/desk/you" || path.startsWith("/desk/you/")) return "/admin/you";
+  if (path === "/desk/you" || path.startsWith("/desk/you/")) return "/admin";
   const work = path.match(/^\/desk\/work\/([a-f0-9]{32})\/?$/);
   if (work !== null) return `/admin/loans/${work[1]}`;
   if (path === "/desk/work" || path.startsWith("/desk/work/")) return "/admin/loans";

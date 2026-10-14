@@ -1,4 +1,4 @@
-import type { LoanApplication } from "../api";
+import type { LedgerBlock, LoanApplication } from "../api";
 
 export class AdminError extends Error {
   readonly status: number;
@@ -14,7 +14,7 @@ export class AdminError extends Error {
 export type AdminUser = { id: string; name: string; email: string };
 
 export type AdminOverview = {
-  crewCount: number;
+  groupCount: number;
   cashCents: number;
   pendingPayments: number;
   failedPaymentsWeek: number;
@@ -23,7 +23,7 @@ export type AdminOverview = {
   health: "live" | "degraded";
 };
 
-export type CrewRow = {
+export type GroupRow = {
   id: string;
   name: string;
   email: string;
@@ -45,6 +45,7 @@ export type PaymentRow = {
   amountCents: number;
   status: string;
   createdAt: string;
+  awaitingApproval: boolean;
 };
 
 export type InvestmentRow = {
@@ -52,8 +53,19 @@ export type InvestmentRow = {
   symbol: string;
   name: string;
   units: number;
+  costCents: number;
+  priceCents: number;
   valueCents: number;
+  openedAt: string;
   gainCents: number;
+  priorCloseCents: number | null;
+  closeSession: string | null;
+  priorSession: string | null;
+  dayChangeBps: number | null;
+};
+
+export type InvestmentDetail = InvestmentRow & {
+  marks: { at: string; priceCents: number }[];
 };
 
 export type LoanProduct = {
@@ -62,9 +74,43 @@ export type LoanProduct = {
   interestPercent: number;
   termMin: number;
   termMax: number;
-  termUnit: string;
+  termUnit: "weeks" | "months";
   minimumCents: number;
   maximumCents: number;
+  minimumGuarantors: number;
+  coveragePercent: number;
+  feePercent: number;
+};
+
+export type ProductInput = {
+  code: string;
+  name: string;
+  interestPercent: number;
+  termMin: number;
+  termMax: number;
+  termUnit: "weeks" | "months";
+  minimumCents: number;
+  maximumCents: number;
+  minimumGuarantors: number;
+  coveragePercent: number;
+  feePercent: number;
+};
+
+export type CloseQuote = {
+  symbol: string;
+  name: string;
+  closeCents: number;
+  closeSession: string;
+  priorCloseCents: number | null;
+  priorSession: string | null;
+  dayChangeBps: number | null;
+  listedCloseCents: number | null;
+  fxKesPerUsd: number | null;
+};
+
+export type ListedShare = {
+  symbol: string;
+  name: string;
 };
 
 export type AdminCapacity = {
@@ -87,7 +133,7 @@ function readCookie(name: string): string | null {
 async function ensureCsrf(): Promise<string> {
   const existing = readCookie("hs_csrf");
   if (existing !== null) return existing;
-  const response = await fetch("/api/auth/csrf", { credentials: "include" });
+  const response = await fetch("/api/auth/csrf", { credentials: "include", cache: "no-store" });
   if (!response.ok) throw new AdminError(response.status, "csrf", "Could not start a secure session.");
   const token = readCookie("hs_csrf");
   if (token === null) throw new AdminError(500, "csrf", "Could not start a secure session.");
@@ -142,9 +188,19 @@ export const adminApi = {
   me: () => request<{ admin: AdminUser }>("/api/admin/me"),
   logout: () => request<{ ok: boolean }>("/api/admin/logout", { method: "POST", body: {} }),
   overview: () => request<AdminOverview>("/api/admin/overview"),
-  crew: () => request<{ crew: CrewRow[] }>("/api/admin/crew"),
+  group: () => request<{ group: GroupRow[] }>("/api/admin/group"),
   treasury: () => request<TreasurySnapshot>("/api/admin/treasury"),
   payments: () => request<{ payments: PaymentRow[] }>("/api/admin/payments"),
+  approveWithdraw: (id: string) =>
+    request<{ payment: { id: string; status: string; awaitingApproval: boolean } }>(
+      `/api/admin/payments/${id}/approve`,
+      { method: "POST", body: {} },
+    ),
+  rejectWithdraw: (id: string) =>
+    request<{ payment: { id: string; status: string; awaitingApproval: boolean } }>(
+      `/api/admin/payments/${id}/reject`,
+      { method: "POST", body: {} },
+    ),
   investments: () => request<{ investments: InvestmentRow[] }>("/api/admin/investments"),
   loans: () => request<{ applications: LoanApplication[] }>("/api/admin/loans"),
   loan: (id: string) =>
@@ -158,6 +214,19 @@ export const adminApi = {
   disburse: (id: string) =>
     request<{ application: LoanApplication }>(`/api/admin/loans/${id}/disburse`, { method: "POST", body: {} }),
   products: () => request<{ products: LoanProduct[] }>("/api/admin/products"),
+  createProduct: (body: ProductInput) =>
+    request<{ product: LoanProduct }>("/api/admin/products", { method: "POST", body }),
+  updateProduct: (code: string, body: Omit<ProductInput, "code">) =>
+    request<{ product: LoanProduct }>(`/api/admin/products/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      body,
+    }),
+  symbols: () => request<{ symbols: ListedShare[] }>("/api/admin/symbols"),
+  quote: (symbol: string) => request<CloseQuote>(`/api/admin/quotes/${encodeURIComponent(symbol)}`),
+  buy: (body: { symbol: string; name: string; units: number }) =>
+    request<{ id: string; blockId: number }>("/api/admin/investments", { method: "POST", body }),
+  investment: (id: string) => request<{ investment: InvestmentDetail }>(`/api/admin/investments/${id}`),
+  ledger: () => request<{ blocks: LedgerBlock[] }>("/api/admin/ledger"),
   ledgerVerify: () =>
     request<{ ok: true; length: number } | { ok: false; index: number; reason: string }>("/api/admin/ledger/verify"),
 };

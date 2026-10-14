@@ -141,7 +141,7 @@ export function SpringAmount({ value }: { value: number }): React.ReactElement {
   return <animated.span className="claim-figure">{n.to((current) => money.format(current))}</animated.span>;
 }
 
-/** Claim figure with no count-up — use on Pot and Move. */
+/** Claim figure with no count-up — use on Pot and Transact. */
 export function StaticAmount({ value }: { value: number }): React.ReactElement {
   return <span className="claim-figure">{money.format(value)}</span>;
 }

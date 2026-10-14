@@ -6,9 +6,11 @@ type SheetProps = {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  className?: string;
+  backdropClassName?: string;
 };
 
-export function Sheet({ title, onClose, children }: SheetProps): React.ReactElement {
+export function Sheet({ title, onClose, children, className, backdropClassName }: SheetProps): React.ReactElement {
   const closeRef = useRef<HTMLButtonElement>(null);
   const reduced = useReducedMotion();
   const style = useSpring({
@@ -29,10 +31,13 @@ export function Sheet({ title, onClose, children }: SheetProps): React.ReactElem
     };
   }, [onClose]);
 
+  const backdropClass = ["sheet-backdrop", backdropClassName].filter(Boolean).join(" ");
+  const sheetClass = ["sheet", className].filter(Boolean).join(" ");
+
   return (
-    <div className="sheet-backdrop" onMouseDown={onClose}>
+    <div className={backdropClass} onMouseDown={onClose}>
       <animated.div
-        className="sheet"
+        className={sheetClass}
         role="dialog"
         aria-modal="true"
         aria-labelledby="sheet-title"
@@ -45,8 +50,8 @@ export function Sheet({ title, onClose, children }: SheetProps): React.ReactElem
           <h2 id="sheet-title" className="screen-title">
             {title}
           </h2>
-          <button ref={closeRef} type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <span aria-hidden="true">×</span>
+          <button ref={closeRef} type="button" className="close-btn" onClick={onClose} aria-label="Close">
+            <span aria-hidden="true">X</span>
           </button>
         </div>
         {children}

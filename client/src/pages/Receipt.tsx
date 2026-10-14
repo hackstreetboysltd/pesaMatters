@@ -15,7 +15,7 @@ const STEPS: Record<Receipt["kind"], readonly FlowStep[]> = {
   withdraw: [
     { id: "amount", title: "How much?" },
     { id: "phone", title: "Receive on M-Pesa" },
-    { id: "wait", title: "Approve on your phone" },
+    { id: "wait", title: "Waiting for admin" },
     { id: "receipt", title: "Receipt" },
   ],
   transfer: [
@@ -26,8 +26,8 @@ const STEPS: Record<Receipt["kind"], readonly FlowStep[]> = {
 };
 
 function kindLabel(kind: Receipt["kind"]): string {
-  if (kind === "deposit") return "Add";
-  if (kind === "withdraw") return "Out";
+  if (kind === "deposit") return "Deposit";
+  if (kind === "withdraw") return "Draw";
   return "Send";
 }
 
@@ -57,6 +57,10 @@ export function ReceiptPage(): React.ReactElement {
 
   const steps = receipt === null ? STEPS.deposit : STEPS[receipt.kind];
   const last = steps.length - 1;
+  const currentStep =
+    receipt !== null && (receipt.awaitingApproval || receipt.status === "pending" || receipt.status === "settling")
+      ? Math.max(0, last - 1)
+      : last;
   const downloadButton =
     receipt?.status === "succeeded" ? (
       <button type="button" className="primary" disabled={downloading} onClick={() => void download()}>
@@ -97,9 +101,9 @@ export function ReceiptPage(): React.ReactElement {
       <main className="screen" id="main">
         <StepForm
           steps={steps}
-          step={last}
-          onBack={() => navigate("/you")}
-          {...(downloadButton !== null ? { footer: downloadButton } : {})}
+          step={currentStep}
+          title={null}
+          {...(downloadButton !== null ? { className: "step-form-docked", footer: downloadButton } : {})}
         >
           {error !== null ? (
             <p className="alert" role="alert">
@@ -150,7 +154,10 @@ export function ReceiptPage(): React.ReactElement {
                   <p className="receipt-code-note">The first 12 digits of this ledger hash.</p>
                 </div>
               ) : null}
-              {receipt.status === "pending" || receipt.status === "settling" ? (
+              {receipt.awaitingApproval ? (
+                <p className="hint">An admin has to approve this draw before M-Pesa sends the money.</p>
+              ) : null}
+              {!receipt.awaitingApproval && (receipt.status === "pending" || receipt.status === "settling") ? (
                 <p className="hint">Still waiting for M-Pesa to confirm.</p>
               ) : null}
               {receipt.status === "failed" ? <p className="alert">This move did not complete.</p> : null}

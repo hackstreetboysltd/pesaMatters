@@ -6,7 +6,6 @@ function emptyAsUnset(value: unknown): unknown {
 
 const Env = z.object({
   DATABASE_URL: z.string().min(1).max(500),
-  SEED_PASSWORD: z.string().min(10).max(200),
   PORT: z.coerce.number().int().min(1).max(65535).default(8787),
   APP_ORIGIN: z.string().url().max(200),
   COOKIE_SECURE: z.enum(["true", "false"]).default("false"),
@@ -64,7 +63,6 @@ export type MpesaConfig = { mode: "mock" } | MpesaLive;
 
 export type AppConfig = {
   databaseUrl: string;
-  seedPassword: string;
   port: number;
   appOrigin: string;
   cookieSecure: boolean;
@@ -96,7 +94,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   return {
     databaseUrl: parsed.data.DATABASE_URL,
-    seedPassword: parsed.data.SEED_PASSWORD,
     port: parsed.data.PORT,
     appOrigin: parsed.data.APP_ORIGIN,
     cookieSecure: parsed.data.COOKIE_SECURE === "true",

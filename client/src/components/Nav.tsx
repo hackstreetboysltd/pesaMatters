@@ -13,7 +13,7 @@ type NavLinkItem = {
 
 const memberLinks: NavLinkItem[] = [
   { to: "/", label: "Pot", end: true, icon: MarkPot },
-  { to: "/move", label: "Move", end: false, icon: MarkMove },
+  { to: "/transact", label: "Transact", end: false, icon: MarkMove },
   { to: "/loans", label: "Loans", end: false, icon: MarkLoan },
   { to: "/invest", label: "Invest", end: false, icon: MarkInvest },
   { to: "/you", label: "You", end: false, icon: MarkYou },
@@ -31,7 +31,7 @@ export function Nav({ links = memberLinks }: { links?: readonly NavLinkItem[] })
 
   const count = String(links.length);
   return (
-    <nav className="nav" aria-label="Crew" style={{ "--nav-count": count } as CSSProperties}>
+    <nav className="nav" aria-label="Group" style={{ "--nav-count": count } as CSSProperties}>
       <animated.span
         className="nav-dot"
         aria-hidden="true"

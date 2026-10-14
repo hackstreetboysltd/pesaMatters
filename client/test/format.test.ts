@@ -5,10 +5,18 @@ import {
   MAX_MPESA_CENTS,
   explainShillings,
   formatNoticeTime,
+  formatPersonName,
   formatShillingsTyping,
   parseShillings,
   shillingsToCents,
 } from "../src/format.ts";
+
+test("formatPersonName title-cases each word", () => {
+  assert.equal(formatPersonName("BUNYASI PHIL KAKAI"), "Bunyasi Phil Kakai");
+  assert.equal(formatPersonName("Phil Kakai"), "Phil Kakai");
+  assert.equal(formatPersonName("  tom   alvin "), "Tom Alvin");
+  assert.equal(formatPersonName(""), "");
+});
 
 test("formatNoticeTime is a lowercase 12-hour clock", () => {
   const iso = "2026-10-02T20:38:00.000Z";

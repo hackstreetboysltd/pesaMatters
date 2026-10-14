@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   GoogleAuthError,
   codeChallenge,
+  exchangeGoogleCode,
   googleAuthorizeUrl,
   googleCallbackHandoff,
   googleSignInFailure,
   httpDateMs,
+  loadGoogleCerts,
   rawQueryParam,
   verificationNowMs,
   verifyGoogleIdToken,
@@ -137,6 +139,71 @@ test("exchange failures keep Google's codes off the login page", () => {
   assert.equal(googleSignInFailure(new GoogleAuthError("bad_token", "invalid_client")), "google_client");
   assert.equal(googleSignInFailure(new GoogleAuthError("unverified_email")), "email_unverified");
   assert.equal(googleSignInFailure(new Error("database down")), null);
+});
+
+function netFail(): Error {
+  return Object.assign(new Error("fetch failed"), {
+    cause: Object.assign(new Error("connect"), { code: "ENETUNREACH" }),
+  });
+}
+
+test("loadGoogleCerts retries a dropped Google fetch once", async () => {
+  let certCalls = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    assert.ok(url.includes("/certs"), `unexpected ${url}`);
+    certCalls += 1;
+    if (certCalls === 1) throw netFail();
+    return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
+  };
+  const loaded = await loadGoogleCerts(fetchImpl);
+  assert.equal(certCalls, 2);
+  assert.equal(loaded.certs.length, 1);
+  assert.equal(loaded.certs[0]?.n, jwk.n);
+});
+
+test("exchangeGoogleCode retries a dropped token fetch once", async () => {
+  let tokenCalls = 0;
+  const idToken = signToken(claims());
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    assert.ok(url.includes("/token"), `unexpected ${url}`);
+    tokenCalls += 1;
+    if (tokenCalls === 1) throw netFail();
+    return new Response(JSON.stringify({ id_token: idToken }), {
+      status: 200,
+      headers: { date: new Date().toUTCString() },
+    });
+  };
+  const profile = await exchangeGoogleCode(
+    {
+      code: "auth-code",
+      verifier: "verifier-value",
+      clientId,
+      clientSecret: "secret",
+      redirectUri: "http://127.0.0.1:5173/api/auth/google/callback",
+      certs: [jwk],
+    },
+    fetchImpl,
+  );
+  assert.equal(tokenCalls, 2);
+  assert.equal(profile.email, "kakai@gmail.com");
+});
+
+test("three failed Google fetches become google_network", async () => {
+  let certCalls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    certCalls += 1;
+    throw netFail();
+  };
+  await assert.rejects(
+    () => loadGoogleCerts(fetchImpl),
+    (error: unknown) =>
+      error instanceof GoogleAuthError &&
+      error.oauthError === "network" &&
+      googleSignInFailure(error) === "google_network",
+  );
+  assert.equal(certCalls, 3);
 });
 
 test("an expired token is rejected", () => {

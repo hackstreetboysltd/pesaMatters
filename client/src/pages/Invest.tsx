@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api, type Investment } from "../api";
-import { BackLink } from "../components/BackLink";
-import { MarkPlus } from "../components/marks";
 import { Nav } from "../components/Nav";
 import { formatDayPercent, formatKes } from "../format";
 
@@ -29,11 +27,7 @@ export function Invest(): React.ReactElement {
     <>
       <main className="screen" id="main">
         <header className="screen-head">
-          <BackLink to="/" label="Back to Pot" />
-          <h1 className="screen-title">Invest</h1>
-          <Link className="icon-btn" to="/invest/new" aria-label="Add investment">
-            <MarkPlus />
-          </Link>
+          <h1 className="screen-title">Investments</h1>
         </header>
         {error !== null ? (
           <p className="alert" role="alert">

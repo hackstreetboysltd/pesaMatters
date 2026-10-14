@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import type { Express } from "express";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { AppConfig } from "../config.ts";
 import type { Db } from "../db.ts";
@@ -27,11 +28,22 @@ import {
   type Admin,
   LoanError,
 } from "../loans/service.ts";
-import { listBlocks, verifyStoredChain } from "../store.ts";
+import {
+  createProduct,
+  ProductError,
+  updateProduct,
+  type ProductInput,
+} from "../loans/products.ts";
+import { MoneyError } from "../money.ts";
+import { QuoteError, dayChangeBps, nairobiDate, type QuoteSource } from "../quotes.ts";
+import { realNowDate } from "../realTime.ts";
+import { appendEntry, getInvestment, listBlocks, verifyStoredChain } from "../store.ts";
+import { nseShares } from "../symbols.ts";
+import { approveWithdraw, PaymentError, rejectWithdraw } from "../payments.ts";
 import {
   loadAdminInvestments,
   loadAdminLoans,
-  loadCrew,
+  loadGroup,
   loadOverview,
   loadPayments,
   loadProducts,
@@ -65,6 +77,43 @@ const DecideBody = z
     message: "State the approved amount",
   });
 
+const ProductFields = z.object({
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z][A-Z0-9]{1,15}$/),
+  name: z.string().trim().min(2).max(80),
+  interestPercent: z.number().int().min(0).max(100),
+  termMin: z.number().int().min(1).max(36),
+  termMax: z.number().int().min(1).max(36),
+  termUnit: z.enum(["weeks", "months"]),
+  minimumCents: z.number().int().positive().max(100_000_000_00),
+  maximumCents: z.number().int().positive().max(100_000_000_00),
+  minimumGuarantors: z.number().int().min(0).max(20),
+  coveragePercent: z.number().int().min(0).max(100),
+  feePercent: z.number().int().min(0).max(100),
+});
+
+const ProductBody = ProductFields.refine((value) => value.termMin <= value.termMax, { message: "term range" })
+  .refine((value) => value.minimumCents <= value.maximumCents, { message: "amount range" })
+  .refine((value) => value.minimumCents % 100 === 0 && value.maximumCents % 100 === 0, {
+    message: "whole shillings",
+  });
+
+const ProductPatchBody = ProductFields.omit({ code: true })
+  .refine((value) => value.termMin <= value.termMax, { message: "term range" })
+  .refine((value) => value.minimumCents <= value.maximumCents, { message: "amount range" })
+  .refine((value) => value.minimumCents % 100 === 0 && value.maximumCents % 100 === 0, {
+    message: "whole shillings",
+  });
+
+const InvestBody = z.object({
+  symbol: z.string().trim().min(1).max(16),
+  name: z.string().trim().min(1).max(80).optional(),
+  units: z.number().positive().max(1_000_000),
+});
+
 const GOOGLE_FAIL: Record<string, { status: number; message: string }> = {
   google: { status: 502, message: "Google sign-in did not finish. Try again." },
   google_off: {
@@ -72,7 +121,7 @@ const GOOGLE_FAIL: Record<string, { status: number; message: string }> = {
     message: "Google sign-in needs a client id and secret in the server environment.",
   },
   google_state: { status: 400, message: "That sign-in expired. Try Continue with Google again." },
-  google_network: { status: 502, message: "Could not reach Google. Check the network, then try again." },
+  google_network: { status: 502, message: "Could not reach Google. Check the network or pause the VPN, then try again." },
   google_clock: {
     status: 409,
     message: "This device's clock is wrong. Set the correct date and time, then try again.",
@@ -159,12 +208,41 @@ function isDuplicate(error: unknown): boolean {
   );
 }
 
+async function adminQuote(quotes: QuoteSource, symbol: string, fresh: boolean) {
+  try {
+    return await quotes.load(symbol, nairobiDate(realNowDate()), fresh);
+  } catch (error) {
+    if (error instanceof QuoteError) {
+      const status = error.code === "bad_symbol" ? 422 : error.code === "unknown_symbol" ? 404 : 502;
+      throw new LoanError(status, error.code, error.message);
+    }
+    throw error;
+  }
+}
+
+function toProductInput(body: z.infer<typeof ProductBody>): ProductInput {
+  return {
+    code: body.code,
+    name: body.name,
+    interestPercent: body.interestPercent,
+    termMin: body.termMin,
+    termMax: body.termMax,
+    termUnit: body.termUnit,
+    minimumCents: body.minimumCents,
+    maximumCents: body.maximumCents,
+    minimumGuarantors: body.minimumGuarantors,
+    coveragePercent: body.coveragePercent,
+    feePercent: body.feePercent,
+  };
+}
+
 export function registerAdminRoutes(
   app: Express,
   pool: Db,
   config: AppConfig,
   limiter: RateLimiter,
   rails: Rails,
+  quotes: QuoteSource,
 ): void {
   app.get("/api/admin/auth/google", (_req, res) => {
     if (config.google === null) {
@@ -283,9 +361,9 @@ export function registerAdminRoutes(
   );
 
   app.get(
-    "/api/admin/crew",
+    "/api/admin/group",
     asyncRoute(async (_req, res) => {
-      res.json({ crew: await loadCrew(pool) });
+      res.json({ group: await loadGroup(pool) });
     }),
   );
 
@@ -305,10 +383,126 @@ export function registerAdminRoutes(
     }),
   );
 
+  app.post(
+    "/api/admin/payments/:id/approve",
+    asyncRoute(async (req, res) => {
+      const id = Id.parse(req.params["id"]);
+      try {
+        const payment = await approveWithdraw(pool, rails, id);
+        res.json({ payment });
+      } catch (error) {
+        if (error instanceof PaymentError) {
+          throw new LoanError(error.status, error.code, error.message);
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.post(
+    "/api/admin/payments/:id/reject",
+    asyncRoute(async (req, res) => {
+      const id = Id.parse(req.params["id"]);
+      try {
+        const payment = await rejectWithdraw(pool, id);
+        res.json({ payment });
+      } catch (error) {
+        if (error instanceof PaymentError) {
+          throw new LoanError(error.status, error.code, error.message);
+        }
+        throw error;
+      }
+    }),
+  );
+
   app.get(
     "/api/admin/investments",
     asyncRoute(async (_req, res) => {
       res.json({ investments: await loadAdminInvestments(pool) });
+    }),
+  );
+
+  app.get(
+    "/api/admin/investments/:id",
+    asyncRoute(async (req, res) => {
+      const id = Id.parse(req.params["id"]);
+      const investment = await getInvestment(pool, id);
+      if (investment === null) throw new LoanError(404, "not_found", "That investment is not on the books.");
+      res.json({ investment });
+    }),
+  );
+
+  app.get(
+    "/api/admin/symbols",
+    asyncRoute(async (_req, res) => {
+      res.json({ symbols: await nseShares() });
+    }),
+  );
+
+  app.get(
+    "/api/admin/quotes/:symbol",
+    asyncRoute(async (req, res) => {
+      const symbol = req.params["symbol"];
+      if (typeof symbol !== "string") {
+        throw new LoanError(422, "bad_symbol", "Use the NSE ticker, like SCOM.");
+      }
+      const quote = await adminQuote(quotes, symbol, false);
+      const latest = quote.closes[quote.closes.length - 1];
+      const prior = quote.closes.length >= 2 ? quote.closes[quote.closes.length - 2] : undefined;
+      if (latest === undefined) {
+        throw new LoanError(404, "unknown_symbol", "That ticker has no published close.");
+      }
+      res.json({
+        symbol: quote.symbol,
+        name: quote.name,
+        closeCents: latest.closeCents,
+        closeSession: latest.sessionDate,
+        priorCloseCents: prior?.closeCents ?? null,
+        priorSession: prior?.sessionDate ?? null,
+        dayChangeBps: prior === undefined ? null : dayChangeBps(prior.closeCents, latest.closeCents),
+        listedCloseCents: quote.listedCloseCents,
+        fxKesPerUsd: quote.fxKesPerUsd,
+      });
+    }),
+  );
+
+  app.post(
+    "/api/admin/investments",
+    asyncRoute(async (req, res) => {
+      const admin = (req as AdminReq).admin;
+      if (admin === undefined) throw new LoanError(401, "unauthenticated", "Sign in to admin.");
+      const body = InvestBody.parse(req.body);
+      const unitsMicro = Math.round(body.units * 1_000_000);
+      if (!Number.isInteger(unitsMicro) || unitsMicro <= 0) {
+        throw new LoanError(422, "bad_units", "Enter a whole or decimal unit count the pot can hold.");
+      }
+      const quote = await adminQuote(quotes, body.symbol, true);
+      const latest = quote.closes[quote.closes.length - 1];
+      const prior = quote.closes.length >= 2 ? quote.closes[quote.closes.length - 2] : undefined;
+      if (latest === undefined) {
+        throw new LoanError(404, "unknown_symbol", "That ticker has no published close.");
+      }
+      const id = randomBytes(16).toString("hex");
+      try {
+        const block = await appendEntry(pool, "invest", {
+          investmentId: id,
+          memberId: admin.id,
+          adminId: admin.id,
+          symbol: quote.symbol,
+          name: body.name ?? quote.name,
+          unitsMicro,
+          priceCents: latest.closeCents,
+          sessionDate: latest.sessionDate,
+          priorCloseCents: prior?.closeCents ?? null,
+          priorSession: prior?.sessionDate ?? null,
+        });
+        res.status(201).json({ id, blockId: block.id });
+      } catch (error) {
+        if (error instanceof MoneyError) {
+          throw new LoanError(422, error.code, error.message);
+        }
+        throw error;
+      }
     }),
   );
 
@@ -384,7 +578,56 @@ export function registerAdminRoutes(
   app.get(
     "/api/admin/products",
     asyncRoute(async (_req, res) => {
-      res.json({ products: loadProducts() });
+      res.json({ products: await loadProducts(pool) });
+    }),
+  );
+
+  app.post(
+    "/api/admin/products",
+    asyncRoute(async (req, res) => {
+      const body = ProductBody.parse(req.body);
+      try {
+        const product = await createProduct(pool, toProductInput(body));
+        res.status(201).json({ product });
+      } catch (error) {
+        if (error instanceof ProductError) {
+          throw new LoanError(error.status, error.code, error.message);
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.patch(
+    "/api/admin/products/:code",
+    asyncRoute(async (req, res) => {
+      const code = z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z][A-Z0-9]{1,15}$/)
+        .parse(req.params["code"]);
+      const body = ProductPatchBody.parse(req.body);
+      try {
+        const product = await updateProduct(pool, code, {
+          name: body.name,
+          interestPercent: body.interestPercent,
+          termMin: body.termMin,
+          termMax: body.termMax,
+          termUnit: body.termUnit,
+          minimumCents: body.minimumCents,
+          maximumCents: body.maximumCents,
+          minimumGuarantors: body.minimumGuarantors,
+          coveragePercent: body.coveragePercent,
+          feePercent: body.feePercent,
+        });
+        res.json({ product });
+      } catch (error) {
+        if (error instanceof ProductError) {
+          throw new LoanError(error.status, error.code, error.message);
+        }
+        throw error;
+      }
     }),
   );
 }

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { animated, to, useSpring, useSprings } from "@react-spring/web";
-import { ApiError, api, type LedgerBlock } from "../api";
+import { useNavigate } from "react-router-dom";
+import type { LedgerBlock } from "../api";
 import { BackLink } from "../components/BackLink";
 import { MarkVerify } from "../components/marks";
 import { Nav } from "../components/Nav";
@@ -8,6 +9,7 @@ import { Pager } from "../components/Pager";
 import { LedgerEntry, nameMap, statementFor, symbolMap } from "../ledgerView";
 import { useReducedMotion } from "../motion";
 import { PAGE_SIZE, pageWindow } from "../paging";
+import { AdminError, adminApi } from "./api";
 
 const EMBER = "#ff5c1a";
 const SEAL = "#1e6b45";
@@ -20,13 +22,14 @@ function stepMs(length: number): number {
   return Math.max(90, Math.round(2200 / length));
 }
 
-type VerifyOutcome =
-  | { ok: true; length: number }
-  | { ok: false; index: number; reason: string };
+type VerifyOutcome = { ok: true; length: number } | { ok: false; index: number; reason: string };
 
 type Phase = "idle" | "checking" | "success" | "failure";
 
-export function Ledger(): React.ReactElement {
+type NavLinks = NonNullable<ComponentProps<typeof Nav>["links"]>;
+
+export function Ledger({ navLinks }: { navLinks: NavLinks }): React.ReactElement {
+  const navigate = useNavigate();
   const [blocks, setBlocks] = useState<LedgerBlock[] | null>(null);
   const [names, setNames] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [error, setError] = useState<string | null>(null);
@@ -65,22 +68,27 @@ export function Ledger(): React.ReactElement {
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.ledger(), api.members()])
+    Promise.all([adminApi.ledger(), adminApi.group()])
       .then(([payload, crew]) => {
         if (!active) return;
         setBlocks(payload.blocks);
-        setNames(nameMap(crew.members));
+        setNames(nameMap(crew.group));
         setPage(0);
         setOpenHashes(new Set());
       })
       .catch((caught: unknown) => {
-        if (active) setError(caught instanceof ApiError ? caught.message : "Could not read the chain.");
+        if (!active) return;
+        if (caught instanceof AdminError && caught.status === 401) {
+          navigate("/login", { replace: true });
+          return;
+        }
+        setError(caught instanceof AdminError ? caught.message : "Could not read the chain.");
       });
     return () => {
       active = false;
       runId.current += 1;
     };
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (page !== slice.page) setPage(slice.page);
@@ -217,7 +225,7 @@ export function Ledger(): React.ReactElement {
 
     let outcome: VerifyOutcome;
     try {
-      outcome = await verifyChainRequest();
+      outcome = await adminApi.ledgerVerify();
     } catch {
       if (token !== runId.current) return;
       setPhase("idle");
@@ -240,7 +248,7 @@ export function Ledger(): React.ReactElement {
     <>
       <main className="screen" id="main">
         <header className="screen-head">
-          <BackLink to="/move" label="Back to Move" />
+          <BackLink to="/" label="Back to Dashboard" />
           <h1 className="screen-title">Ledger</h1>
           <button
             type="button"
@@ -263,6 +271,7 @@ export function Ledger(): React.ReactElement {
             {error}
           </p>
         ) : null}
+        {blocks !== null && blocks.length === 0 ? <p className="empty">No blocks yet.</p> : null}
         <div
           ref={listTop}
           className={`ledger${phase === "success" ? " ledger-sound" : ""}${phase === "failure" ? " ledger-broken" : ""}`}
@@ -294,6 +303,7 @@ export function Ledger(): React.ReactElement {
                 hashesOpen={openHashes.has(block.id)}
                 onToggleHashes={() => toggleHashes(block.id)}
                 fault={faultAt === chainIndex}
+                receiptNav="href"
                 mark={
                   <animated.div
                     className="ledger-mark"
@@ -321,7 +331,7 @@ export function Ledger(): React.ReactElement {
           <Pager label="Ledger pages" total={newestFirst.length} slice={slice} onPage={goToPage} />
         ) : null}
       </main>
-      <Nav />
+      <Nav links={navLinks} />
     </>
   );
 }
@@ -331,9 +341,9 @@ function mixTone(tone: number): string {
   return lerpHex(SEAL, FAULT, Math.min(1, tone - 1));
 }
 
-function lerpHex(from: string, to: string, t: number): string {
+function lerpHex(from: string, toColor: string, t: number): string {
   const [ar, ag, ab] = hexRgb(from);
-  const [br, bg, bb] = hexRgb(to);
+  const [br, bg, bb] = hexRgb(toColor);
   const mix = (a: number, b: number): number => Math.round(a + (b - a) * t);
   return `rgb(${mix(ar, br)} ${mix(ag, bg)} ${mix(ab, bb)})`;
 }
@@ -347,25 +357,6 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
-}
-
-async function verifyChainRequest(): Promise<VerifyOutcome> {
-  const response = await fetch("/api/ledger/verify", { credentials: "include" });
-  const body: unknown = await response.json();
-  if (response.ok) {
-    const length =
-      body !== null && typeof body === "object" && "length" in body && typeof (body as { length?: unknown }).length === "number"
-        ? (body as { length: number }).length
-        : 0;
-    return { ok: true, length };
-  }
-  if (body !== null && typeof body === "object") {
-    const record = body as { ok?: unknown; index?: unknown; reason?: unknown };
-    if (record.ok === false && typeof record.index === "number" && typeof record.reason === "string") {
-      return { ok: false, index: record.index, reason: record.reason };
-    }
-  }
-  return { ok: false, index: -1, reason: "the chain does not match its records" };
 }
 
 function messageForFailure(outcome: Extract<VerifyOutcome, { ok: false }>, length: number): string {

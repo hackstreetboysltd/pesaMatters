@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, type LedgerBlock, type Member } from "../api";
-import { BackLink } from "../components/BackLink";
+import { ModeSwitch } from "../components/ModeSwitch";
 import { Nav } from "../components/Nav";
 import { Pager } from "../components/Pager";
-import { formatKes, formatNoticeDay, formatNoticeTime } from "../format";
+import { formatKes, formatNoticeDay, formatNoticeTime, formatPersonName } from "../format";
 import { LedgerEntry, nameMap, personalBlocks, symbolMap } from "../ledgerView";
 import { useReducedMotion } from "../motion";
 import { accountNotice, actionNotices, mergeNotices, noticeView, readNotices, recordNotice, type Notice } from "../notices";
@@ -31,12 +31,12 @@ export function Profile(): React.ReactElement {
   useEffect(() => {
     let active = true;
     Promise.all([api.me(), api.ledger(), api.members()])
-      .then(([me, ledger, crew]) => {
+      .then(([me, ledger, group]) => {
         if (!active) return;
         setMember(me.member);
         setClaim(me.claimCents);
         setBlocks(ledger.blocks);
-        setNames(nameMap(crew.members));
+        setNames(nameMap(group.members));
         setLocalNotices(readNotices(me.member.id, localStorage));
       })
       .catch((caught: unknown) => {
@@ -109,9 +109,8 @@ export function Profile(): React.ReactElement {
     <>
       <main className="screen" id="main">
         <header className="screen-head">
-          <BackLink to="/" label="Back to Pot" />
           <div className="profile-id">
-            <h1 className="screen-title">{member?.name ?? "You"}</h1>
+            <h1 className="screen-title">{member ? formatPersonName(member.name) : "You"}</h1>
             {member !== null ? <p className="profile-mail">{member.email}</p> : null}
           </div>
           <button type="button" className="icon-btn" aria-label="Log out" onClick={() => void onSignOut()}>
@@ -122,28 +121,17 @@ export function Profile(): React.ReactElement {
             </svg>
           </button>
         </header>
-        <div className="tabs" role="tablist" aria-label="Profile">
-          {(
-            [
-              ["info", "Info"],
-              ["activity", "Activity"],
-              ["personalization", "Personalization"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className="tab"
-              role="tab"
-              id={`tab-${id}`}
-              aria-selected={tab === id}
-              aria-controls={`panel-${id}`}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <ModeSwitch
+          label="Profile"
+          variant="tabs"
+          value={tab}
+          options={[
+            ["info", "Info"],
+            ["activity", "Activity"],
+            ["personalization", "Custom"],
+          ]}
+          onChange={setTab}
+        />
         {error !== null ? (
           <p className="alert" role="alert">
             {error}

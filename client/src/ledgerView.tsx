@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { LedgerBlock } from "./api";
 import { MarkChain, MarkDeposit, MarkInvest, MarkMove, MarkPrice, MarkWithdraw } from "./components/marks";
-import { formatKes, formatWhen } from "./format";
+import { formatKes, formatPersonName, formatWhen } from "./format";
 import { personalBlocks } from "./notices";
 
 export { personalBlocks };
@@ -20,7 +20,7 @@ type Statement = {
 };
 
 export function nameMap(members: { id: string; name: string }[]): ReadonlyMap<string, string> {
-  return new Map(members.map((member) => [member.id, member.name]));
+  return new Map(members.map((member) => [member.id, formatPersonName(member.name)]));
 }
 
 export function symbolMap(blocks: LedgerBlock[]): ReadonlyMap<string, string> {
@@ -134,6 +134,7 @@ export function LedgerEntry({
   onToggleHashes,
   fault = false,
   mark,
+  receiptNav = "router",
 }: {
   block: LedgerBlock;
   names: ReadonlyMap<string, string>;
@@ -142,12 +143,16 @@ export function LedgerEntry({
   onToggleHashes: () => void;
   fault?: boolean;
   mark?: ReactNode;
+  /** Admin SPA uses site-root hrefs; member portal uses the router. */
+  receiptNav?: "router" | "href" | "none";
 }): ReactElement {
   const statement = statementFor(block, names, symbols);
   const hashPanelId = `block-hashes-${block.id}`;
   const paymentId = asString(block.payload.paymentId);
   const receiptTo =
-    paymentId !== null && (block.entryType === "deposit" || block.entryType === "withdraw" || block.entryType === "transfer")
+    receiptNav !== "none" &&
+    paymentId !== null &&
+    (block.entryType === "deposit" || block.entryType === "withdraw" || block.entryType === "transfer")
       ? `/receipts/${paymentId}`
       : null;
   const body = (
@@ -176,10 +181,14 @@ export function LedgerEntry({
         </div>
       )}
       <div className="ledger-copy">
-        {receiptTo !== null ? (
+        {receiptTo !== null && receiptNav === "router" ? (
           <Link className="ledger-main" to={receiptTo}>
             {body}
           </Link>
+        ) : receiptTo !== null && receiptNav === "href" ? (
+          <a className="ledger-main" href={receiptTo}>
+            {body}
+          </a>
         ) : (
           <div className="ledger-main">{body}</div>
         )}

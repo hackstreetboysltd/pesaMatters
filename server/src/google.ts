@@ -192,14 +192,52 @@ export type LoadedGoogleCerts = {
   date: string | null;
 };
 
+/** Short code from a thrown network error (or its cause chain). Used in logs only. */
+function networkCode(err: unknown): string {
+  let current: unknown = err;
+  for (let i = 0; i < 4; i += 1) {
+    if (!current || typeof current !== "object") break;
+    if ("code" in current && typeof current.code === "string" && current.code) {
+      return current.code.slice(0, 40);
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  if (err instanceof Error && err.message) return err.message.slice(0, 40);
+  return "unknown";
+}
+
+/**
+ * Fetch Google with retries — transient VPN/IPv6/egress blips otherwise abort sign-in.
+ * Same shape as Sherehe: 3 attempts, 10s timeout, linear backoff.
+ */
+async function fetchGoogle(
+  url: string,
+  init: RequestInit,
+  fetchImpl: typeof fetch,
+): Promise<Response> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await fetchImpl(url, {
+        ...init,
+        signal: init.signal ?? AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      last = err;
+      if (attempt < 2) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 150 * (attempt + 1));
+        });
+      }
+    }
+  }
+  log.warn("google_fetch_failed", { detail: networkCode(last) });
+  throw new GoogleAuthError("bad_token", "network");
+}
+
 /** Google's current RSA signing keys for ID tokens. */
 export async function loadGoogleCerts(fetchImpl: typeof fetch = fetch): Promise<LoadedGoogleCerts> {
-  let response: Response;
-  try {
-    response = await fetchImpl(GOOGLE_CERTS, { signal: AbortSignal.timeout(8000) });
-  } catch {
-    throw new GoogleAuthError("bad_token", "network");
-  }
+  const response = await fetchGoogle(GOOGLE_CERTS, {}, fetchImpl);
   if (!response.ok) {
     throw new GoogleAuthError("bad_token");
   }
@@ -236,17 +274,15 @@ export async function exchangeGoogleCode(
     grant_type: "authorization_code",
     code_verifier: input.verifier,
   });
-  let response: Response;
-  try {
-    response = await fetchImpl(GOOGLE_TOKEN, {
+  const response = await fetchGoogle(
+    GOOGLE_TOKEN,
+    {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch {
-    throw new GoogleAuthError("bad_token", "network");
-  }
+    },
+    fetchImpl,
+  );
   if (!response.ok) {
     throw new GoogleAuthError("bad_token", await oauthErrorCode(response));
   }

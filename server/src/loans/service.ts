@@ -2,8 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Conn, Db, Row } from "../db.ts";
 import type { Rails } from "../mpesa/client.ts";
 import { completeLoanOut, PaymentError, startLoanPayout } from "../payments.ts";
+import { realNowDate, realNowMs } from "../realTime.ts";
 import { coverMismatch, freeDepositsCents, payoutCents, refuseBorrow, refuseGuarantee } from "./capacity.ts";
-import { LOAN_PRODUCTS, productByCode, type LoanProduct } from "./products.ts";
+import { getProduct, listProducts, LOAN_PRODUCTS, type LoanProduct } from "./products.ts";
 import { gate, guaranteesMet, OPEN_STATUSES, statusAfterSubmit } from "./status.ts";
 
 export class LoanError extends Error {
@@ -99,7 +100,7 @@ type AppRow = Row & {
   created_at: string;
 };
 
-function stamp(date = new Date()): string {
+function stamp(date = realNowDate()): string {
   return date.toISOString();
 }
 
@@ -148,17 +149,7 @@ export async function seedLoanProducts(pool: Db): Promise<void> {
         (code, name, interest_percent, term_min, term_max, term_unit, minimum_cents, maximum_cents,
          minimum_guarantors, coverage_percent, fee_percent)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (code) DO UPDATE SET
-         name = EXCLUDED.name,
-         interest_percent = EXCLUDED.interest_percent,
-         term_min = EXCLUDED.term_min,
-         term_max = EXCLUDED.term_max,
-         term_unit = EXCLUDED.term_unit,
-         minimum_cents = EXCLUDED.minimum_cents,
-         maximum_cents = EXCLUDED.maximum_cents,
-         minimum_guarantors = EXCLUDED.minimum_guarantors,
-         coverage_percent = EXCLUDED.coverage_percent,
-         fee_percent = EXCLUDED.fee_percent`,
+       ON CONFLICT (code) DO NOTHING`,
       [
         product.code,
         product.name,
@@ -259,7 +250,7 @@ export async function openAdminSession(pool: Db, admin: Admin): Promise<string> 
   await pool.query("INSERT INTO admin_sessions (token_hash, admin_id, expires_at) VALUES (?, ?, ?)", [
     tokenHash,
     admin.id,
-    stamp(new Date(Date.now() + 1000 * 60 * 60 * 12)),
+    stamp(new Date(realNowMs() + 1000 * 60 * 60 * 12)),
   ]);
   return token;
 }
@@ -410,7 +401,7 @@ async function viewOf(conn: Conn | Db, id: string): Promise<ApplicationView> {
   );
   const row = rows[0];
   if (row === undefined) throw new LoanError(404, "unknown_loan", "That application is not on the books.");
-  const product = productByCode(row.product_code);
+  const product = await getProduct(conn, row.product_code);
   if (product === null) throw new LoanError(500, "server_error", "Something went wrong. Try again.");
   const guarantors = await loadGuarantors(conn, row.id);
   const amount = cents(row.amount_cents);
@@ -456,10 +447,12 @@ export async function mine(pool: Db, memberId: string): Promise<{
   );
   const application = latest[0] === undefined ? null : await viewOf(pool, String(latest[0]["id"]));
   const [incomingRows] = await pool.query<Row>(
-    `SELECT g.id, g.application_id, g.amount_cents, m.name AS borrower_name, a.product_code
+    `SELECT g.id, g.application_id, g.amount_cents, m.name AS borrower_name,
+            COALESCE(p.name, a.product_code) AS product_name
      FROM loan_guarantors g
      JOIN loan_applications a ON a.id = g.application_id
      JOIN members m ON m.id = a.member_id
+     LEFT JOIN loan_products p ON p.code = a.product_code
      WHERE g.member_id = ? AND g.status = 'invited'
      ORDER BY g.created_at ASC`,
     [memberId],
@@ -469,9 +462,10 @@ export async function mine(pool: Db, memberId: string): Promise<{
     applicationId: String(row["application_id"]),
     borrowerName: String(row["borrower_name"]),
     amountCents: cents(row["amount_cents"]),
-    productName: productByCode(String(row["product_code"]))?.name ?? String(row["product_code"]),
+    productName: String(row["product_name"]),
   }));
-  return { capacity, products: [...LOAN_PRODUCTS], application, incoming };
+  const products = await listProducts(pool);
+  return { capacity, products, application, incoming };
 }
 
 export async function searchMembers(pool: Db, memberId: string, query: string): Promise<{ id: string; name: string; freeCents: number }[]> {
@@ -528,7 +522,7 @@ export async function createApplication(
   memberId: string,
   input: { productCode: string; amountCents: number; termCount: number; purpose: string; phone: string; guarantors: Invite[] },
 ): Promise<ApplicationView> {
-  const product = productByCode(input.productCode);
+  const product = await getProduct(pool, input.productCode);
   if (product === null) throw new LoanError(422, "unknown_product", "Choose a loan from the list.");
   if (input.termCount < product.termMin || input.termCount > product.termMax) {
     throw new LoanError(422, "bad_term", "That repayment period is not on this loan.");
@@ -559,7 +553,7 @@ export async function createApplication(
     const ordered = [...input.guarantors].sort((a, b) => a.memberId.localeCompare(b.memberId));
     for (const invite of ordered) {
       const [who] = await conn.query<Row>("SELECT id FROM members WHERE id = ? LIMIT 1", [invite.memberId]);
-      if (who.length === 0) throw new LoanError(422, "unknown_member", "That member is not in the crew.");
+      if (who.length === 0) throw new LoanError(422, "unknown_member", "That member is not in the group.");
       const theirs = await capacityLocked(conn, invite.memberId, null);
       const reason = refuseGuarantee({
         borrowerId: memberId,
@@ -627,7 +621,7 @@ export async function inviteGuarantor(
     );
     if (dup.length > 0) throw new LoanError(409, "duplicate_guarantor", "That member is already on this loan.");
     const [who] = await conn.query<Row>("SELECT id FROM members WHERE id = ? LIMIT 1", [invite.memberId]);
-    if (who.length === 0) throw new LoanError(422, "unknown_member", "That member is not in the crew.");
+    if (who.length === 0) throw new LoanError(422, "unknown_member", "That member is not in the group.");
     const theirs = await capacityLocked(conn, invite.memberId, null);
     const reason = refuseGuarantee({
       borrowerId: memberId,
@@ -770,7 +764,7 @@ export async function decide(
       );
       return;
     }
-    const product = productByCode(String(row["product_code"]));
+    const product = await getProduct(conn, String(row["product_code"]));
     if (product === null || input.amountCents === null) {
       throw new LoanError(422, "bad_amount", "State the approved amount.");
     }
@@ -817,7 +811,7 @@ export async function disburse(pool: Db, rails: Rails, applicationId: string): P
     return viewOf(pool, applicationId);
   }
   const principal = ready.approvedCents;
-  const product = productByCode(ready.productCode);
+  const product = await getProduct(pool, ready.productCode);
   if (principal === null || product === null) throw new LoanError(409, "not_ready", "Only an approved loan can be paid out.");
   const payout = payoutCents(principal, product.feePercent);
   if (payout === null) throw new LoanError(422, "bad_amount", "Fees would consume the whole loan.");

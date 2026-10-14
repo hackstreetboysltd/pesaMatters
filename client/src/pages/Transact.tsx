@@ -1,19 +1,16 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { animated, useSpring } from "@react-spring/web";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, api, type Member } from "../api";
 import { AmountField } from "../components/AmountField";
-import { BackLink } from "../components/BackLink";
 import { Dropdown } from "../components/Dropdown";
 import { KenyanPhoneField } from "../components/KenyanPhoneField";
-import { MarkBook } from "../components/marks";
+import { ModeSwitch } from "../components/ModeSwitch";
 import { Nav } from "../components/Nav";
 import { Pot, StaticAmount } from "../components/Pot";
 import { StepForm, type FlowStep } from "../flow/StepForm";
 import { waitForPayment } from "../flow/waitForPayment";
-import { MAX_MPESA_CENTS, explainShillings, formatKes, shillingsToCents } from "../format";
+import { MAX_MPESA_CENTS, explainShillings, formatKes, formatPersonName, shillingsToCents } from "../format";
 import { readGoalShillings, shareTowardGoal } from "../goal";
-import { useReducedMotion } from "../motion";
 import { displayMsisdn, isCompleteNational } from "../phone";
 
 type Mode = "deposit" | "withdraw" | "send";
@@ -28,7 +25,7 @@ const STEPS: Record<Mode, readonly FlowStep[]> = {
   withdraw: [
     { id: "amount", title: "How much?" },
     { id: "phone", title: "Receive on M-Pesa" },
-    { id: "wait", title: "Approve on your phone" },
+    { id: "wait", title: "Waiting for admin" },
     { id: "receipt", title: "Receipt" },
   ],
   send: [
@@ -42,8 +39,9 @@ function newAttempt(): string {
   return crypto.randomUUID();
 }
 
-export function Move(): React.ReactElement {
+export function Transact(): React.ReactElement {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [mode, setMode] = useState<Mode>("deposit");
   const [step, setStep] = useState(0);
   const [amount, setAmount] = useState("");
@@ -55,13 +53,15 @@ export function Move(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const amountRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const focusAmount = params.get("focus") === "amount";
 
   useEffect(() => {
     let active = true;
     Promise.all([api.members(), api.me(), api.home()])
-      .then(([crew, me, home]) => {
+      .then(([group, me, home]) => {
         if (!active) return;
-        setMembers(crew.members.filter((member) => member.id !== me.member.id));
+        setMembers(group.members.filter((member) => member.id !== me.member.id));
         setClaim(home.you.claimCents);
       })
       .catch((caught: unknown) => {
@@ -72,19 +72,32 @@ export function Move(): React.ReactElement {
     };
   }, []);
 
-  const verb = mode === "deposit" ? "Add" : mode === "withdraw" ? "Out" : "Send";
+  useEffect(() => {
+    if (step !== 0) return;
+    if (focusAmount) setMode("deposit");
+    const field = amountRef.current;
+    if (field !== null) {
+      field.focus();
+      const end = field.value.length;
+      field.setSelectionRange(end, end);
+    }
+    if (!focusAmount) return;
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("focus");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [focusAmount, setParams, step]);
+
+  const verb = mode === "deposit" ? "Deposit" : mode === "withdraw" ? "Draw" : "Send";
   const modes = [
-    ["deposit", "Add"],
-    ["withdraw", "Out"],
+    ["deposit", "Deposit"],
+    ["withdraw", "Draw"],
     ["send", "Send"],
   ] as const;
-  const modeIndex = modes.findIndex(([key]) => key === mode);
-  const reduced = useReducedMotion();
-  const pill = useSpring({
-    x: modeIndex < 0 ? 0 : modeIndex,
-    immediate: reduced,
-    config: { tension: 320, friction: 28 },
-  });
   const shillings = claim === null ? 0 : claim / 100;
   const digits = String(Math.round(shillings)).length;
   const goalShillings = readGoalShillings();
@@ -103,12 +116,6 @@ export function Move(): React.ReactElement {
     setStep(0);
     setError(null);
     setAttempt(newAttempt());
-  }
-
-  function goBack(): void {
-    if (waiting) return;
-    setError(null);
-    setStep((current) => Math.max(0, current - 1));
   }
 
   function amountProblem(): string | null {
@@ -168,6 +175,10 @@ export function Move(): React.ReactElement {
         setAttempt(newAttempt());
         return;
       }
+      if (started.awaitingApproval) {
+        void navigate(`/receipts/${started.id}`);
+        return;
+      }
       setWaiting(true);
       setStep(2);
       const settled = await waitForPayment(started.id);
@@ -191,26 +202,23 @@ export function Move(): React.ReactElement {
 
   const amountForm = (
     <form className="panel" onSubmit={onAmount}>
-      <div className="modes" role="group" aria-label="Movement">
-        <animated.span
-          className="mode-pill"
-          aria-hidden="true"
-          style={{ transform: pill.x.to((value) => `translateX(${value * 100}%)`) }}
-        />
-        {modes.map(([key, label]) => (
-          <button key={key} type="button" className="mode" aria-pressed={mode === key} onClick={() => changeMode(key)}>
-            <span className="mode-name">{label}</span>
-          </button>
-        ))}
-      </div>
-      <AmountField label="Amount" value={amount} onChange={setAmount} required className="field" />
+      <ModeSwitch label="Transact" value={mode} options={modes} onChange={changeMode} />
+      <AmountField
+        label="Amount"
+        value={amount}
+        onChange={setAmount}
+        required
+        placeholder=""
+        className="field"
+        inputRef={amountRef}
+      />
       {mode === "send" ? (
         <div className="field">
           <span id="send-to-label">To</span>
           <Dropdown
-            options={members.map((member) => ({ value: member.id, label: member.name }))}
+            options={members.map((member) => ({ value: member.id, label: formatPersonName(member.name) }))}
             value={toMemberId}
-            listLabel="Crew"
+            listLabel="Group"
             onChange={setToMemberId}
           />
         </div>
@@ -228,58 +236,66 @@ export function Move(): React.ReactElement {
 
   return (
     <>
-      <main className={step === 0 ? "screen screen-move" : "screen"} id="main">
+      <main className={step === 0 ? "screen screen-transact" : "screen"} id="main">
         {step === 0 ? (
           <>
             <header className="screen-head">
-              <BackLink to="/" label="Back to Pot" />
-              <h1 className="screen-title">Move</h1>
-              <Link className="pot-chain" to="/ledger" aria-label="Ledger">
-                <MarkBook />
-              </Link>
+              <h1 className="screen-title">Transact</h1>
             </header>
-            <div
-              className="pot-band"
-              aria-label={
-                claim === null
-                  ? "Your claim"
-                  : goalShillings === null
-                    ? `You can move ${formatKes(claim)}. Set a goal on Pot to fill the bowl.`
-                    : `You can move ${formatKes(claim)}. ${percent}% of your goal.`
-              }
-            >
-              <Pot animate={false} share={fillShare}>
-                {claim !== null ? (
-                  <p className="claim-amount" style={{ ["--digits" as string]: String(digits) }}>
-                    <span className="claim-currency">KES</span>
-                    <StaticAmount value={shillings} />
-                  </p>
-                ) : null}
-              </Pot>
-            </div>
             {amountForm}
+            {mode !== "send" ? (
+              <div
+                className="pot-band"
+                aria-label={
+                  claim === null
+                    ? "Your claim"
+                    : goalShillings === null
+                      ? `Your claim is ${formatKes(claim)}. Set a goal on Pot to fill the bowl.`
+                      : `Your claim is ${formatKes(claim)}. ${percent}% of your goal.`
+                }
+              >
+                <Pot animate={false} share={fillShare}>
+                  {claim !== null ? (
+                    <p className="claim-amount" style={{ ["--digits" as string]: String(digits) }}>
+                      <span className="claim-currency">KES</span>
+                      <StaticAmount value={shillings} />
+                    </p>
+                  ) : null}
+                </Pot>
+              </div>
+            ) : null}
           </>
         ) : (
           <StepForm
             steps={steps}
             step={step}
-            {...(waiting ? {} : { onBack: goBack })}
             {...(step === 1
               ? {
+                  className: "step-form-docked",
                   footer: (
-                    <button type="submit" form="move-pay" className="primary" disabled={!phoneReady || pending || waiting}>
-                      {mode === "send" ? "Confirm" : waiting ? "Waiting for M-Pesa…" : "Receive Prompt"}
+                    <button type="submit" form="transact-pay" className="primary" disabled={!phoneReady || pending || waiting}>
+                      {mode === "send"
+                        ? "Confirm"
+                        : waiting
+                          ? "Waiting for M-Pesa…"
+                          : mode === "withdraw"
+                            ? "Request draw"
+                            : "Receive Prompt"}
                     </button>
                   ),
                 }
               : {})}
           >
-            <form id="move-pay" onSubmit={(event) => void onPay(event)}>
+            <form id="transact-pay" onSubmit={(event) => void onPay(event)}>
               <p className="pick-summary">
                 {verb}
-                {recipient !== null ? ` to ${recipient.name}` : ""} · {cents === null ? amount : formatKes(cents)}
+                {recipient !== null ? ` to ${formatPersonName(recipient.name)}` : ""} ·{" "}
+                {cents === null ? amount : formatKes(cents)}
               </p>
               {needsPhone ? <KenyanPhoneField value={phone} onChange={setPhone} disabled={waiting} /> : null}
+              {mode === "withdraw" && !waiting ? (
+                <p className="hint">An admin has to approve this draw before M-Pesa sends the money.</p>
+              ) : null}
               {waiting ? (
                 <p className="status" role="status">
                   {mode === "withdraw"

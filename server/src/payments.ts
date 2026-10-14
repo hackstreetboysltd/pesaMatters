@@ -7,6 +7,7 @@ import { stkOutcome } from "./mpesa/daraja.ts";
 import { receiptNumberFromHash, shownMpesaReceipt } from "./receiptNo.ts";
 import { receiptPdf } from "./receiptPdf.ts";
 import { settleLoanOut } from "./loans/settle.ts";
+import { realNowIso } from "./realTime.ts";
 import { appendEntry } from "./store.ts";
 
 export class PaymentError extends Error {
@@ -55,6 +56,7 @@ export type ReceiptView = {
   receiptNumber: string | null;
   actorName: string;
   counterpartyName: string | null;
+  awaitingApproval: boolean;
 };
 
 const MAX_MPESA_CENTS = 250_000 * 100;
@@ -148,6 +150,10 @@ async function byCheckout(pool: Db, checkoutOrMerchant: string): Promise<Payment
   return row === undefined ? null : fromJoined(row);
 }
 
+function awaitingApproval(row: PaymentRow): boolean {
+  return row.kind === "withdraw" && row.status === "pending" && row.checkoutRequestId === null;
+}
+
 function viewOf(row: PaymentRow): ReceiptView {
   const blockHash = row.blockHash;
   return {
@@ -162,6 +168,7 @@ function viewOf(row: PaymentRow): ReceiptView {
     receiptNumber: blockHash === null ? null : receiptNumberFromHash(blockHash),
     actorName: row.actorName,
     counterpartyName: row.counterpartyName,
+    awaitingApproval: awaitingApproval(row),
   };
 }
 
@@ -203,7 +210,7 @@ async function assertFunds(pool: Db, memberId: string, amountCents: number, need
   const [claims] = await pool.query<Row>("SELECT claim_cents FROM claims WHERE member_id = ?", [memberId]);
   const claim = Number(claims[0]?.["claim_cents"] ?? NaN);
   if (!Number.isInteger(claim)) {
-    throw new PaymentError(404, "unknown_member", "That member is not in the crew.");
+    throw new PaymentError(404, "unknown_member", "That member is not in the group.");
   }
   if (claim < amountCents) {
     throw new PaymentError(422, "insufficient_claim", "That is more than you can move.");
@@ -226,7 +233,7 @@ async function assertCounterparty(pool: Db, memberId: string, toMemberId: string
   }
   const [rows] = await pool.query<Row>("SELECT id FROM members WHERE id = ?", [toMemberId]);
   if (rows.length === 0) {
-    throw new PaymentError(404, "unknown_member", "That member is not in the crew.");
+    throw new PaymentError(404, "unknown_member", "That member is not in the group.");
   }
 }
 
@@ -235,7 +242,7 @@ function isDuplicate(error: unknown): boolean {
 }
 
 async function insertPending(pool: Db, input: StartInput, id: string): Promise<void> {
-  const created = new Date().toISOString();
+  const created = realNowIso();
   await pool.query(
     `INSERT INTO payments
       (id, member_id, idempotency_key, kind, amount_cents, counterparty_id, phone, status, created_at)
@@ -249,6 +256,39 @@ async function setFailed(pool: Db, id: string, code: string): Promise<void> {
     code.slice(0, 16),
     id,
   ]);
+}
+
+async function payoutPhone(pool: Db, paymentId: string): Promise<string> {
+  const [rows] = await pool.query<Row>("SELECT phone FROM payments WHERE id = ?", [paymentId]);
+  const phone = rows[0]?.["phone"];
+  if (typeof phone !== "string" || phone.length === 0) {
+    throw new PaymentError(422, "bad_phone", "That withdrawal has no M-Pesa number on file.");
+  }
+  return phone;
+}
+
+async function sendB2c(
+  pool: Db,
+  rails: Rails,
+  row: { id: string; amountCents: number; phone: string },
+  offMessage: string,
+): Promise<void> {
+  const shillings = row.amountCents / 100;
+  try {
+    const sent = await rails.b2c({ phone: row.phone, amountKsh: shillings, accountRef: row.id });
+    await pool.query("UPDATE payments SET checkout_request_id = ?, merchant_request_id = ? WHERE id = ?", [
+      sent.conversationId,
+      sent.originatorConversationId,
+      row.id,
+    ]);
+  } catch (error) {
+    const code = error instanceof Error && error.message === "mpesa_b2c_unconfigured" ? "b2c_off" : "mpesa";
+    await setFailed(pool, row.id, code);
+    if (code === "b2c_off") {
+      throw new PaymentError(503, "b2c_off", offMessage);
+    }
+    throw new PaymentError(502, "mpesa", "M-Pesa did not accept that request. Try again.");
+  }
 }
 
 async function claimPending(pool: Db, id: string): Promise<PaymentRow | null> {
@@ -371,31 +411,20 @@ export async function startPayment(pool: Db, rails: Rails, input: StartInput): P
     return viewOf(done);
   }
 
-  const shillings = input.amountCents / 100;
-  const phone = input.phone ?? "";
-  try {
-    if (input.kind === "deposit") {
+  if (input.kind === "deposit") {
+    const shillings = input.amountCents / 100;
+    const phone = input.phone ?? "";
+    try {
       const pushed = await rails.stkPush({ phone, amountKsh: shillings, accountRef: id });
       await pool.query("UPDATE payments SET checkout_request_id = ?, merchant_request_id = ? WHERE id = ?", [
         pushed.checkoutRequestId,
         pushed.merchantRequestId,
         id,
       ]);
-    } else {
-      const sent = await rails.b2c({ phone, amountKsh: shillings, accountRef: id });
-      await pool.query("UPDATE payments SET checkout_request_id = ?, merchant_request_id = ? WHERE id = ?", [
-        sent.conversationId,
-        sent.originatorConversationId,
-        id,
-      ]);
+    } catch {
+      await setFailed(pool, id, "mpesa");
+      throw new PaymentError(502, "mpesa", "M-Pesa did not accept that request. Try again.");
     }
-  } catch (error) {
-    const code = error instanceof Error && error.message === "mpesa_b2c_unconfigured" ? "b2c_off" : "mpesa";
-    await setFailed(pool, id, code);
-    if (code === "b2c_off") {
-      throw new PaymentError(503, "b2c_off", "Withdrawals need Daraja B2C credentials in the server environment.");
-    }
-    throw new PaymentError(502, "mpesa", "M-Pesa did not accept that request. Try again.");
   }
 
   const started = await byId(pool, id);
@@ -421,11 +450,76 @@ export async function checkPayment(pool: Db, rails: Rails, id: string, memberId:
     } else if (outcome === "failed") {
       await finishFailed(pool, row, queried.resultCode);
     }
-  } else if (row.kind === "withdraw" && rails.mode === "mock") {
+  } else if (row.kind === "withdraw" && row.checkoutRequestId !== null && rails.mode === "mock") {
     await finishPaid(pool, row, null, "0");
   }
 
   return viewOf(await loadSeen(pool, id, memberId));
+}
+
+export async function approveWithdraw(pool: Db, rails: Rails, paymentId: string): Promise<ReceiptView> {
+  const row = await byId(pool, paymentId);
+  if (row === null) {
+    throw new PaymentError(404, "unknown_payment", "That payment is not on the books.");
+  }
+  if (row.kind !== "withdraw") {
+    throw new PaymentError(422, "not_withdraw", "Only withdrawals wait for admin approval.");
+  }
+  if (row.status !== "pending" || row.checkoutRequestId !== null) {
+    throw new PaymentError(409, "not_pending", "That withdrawal is no longer waiting for approval.");
+  }
+  await assertFunds(pool, row.memberId, row.amountCents, true);
+  const phone = await payoutPhone(pool, paymentId);
+  const reserve = `hold:${randomBytes(8).toString("hex")}`;
+  const [claimed] = await pool.query<Row>(
+    `UPDATE payments SET checkout_request_id = ?
+     WHERE id = ? AND kind = 'withdraw' AND status = 'pending' AND checkout_request_id IS NULL
+     RETURNING id`,
+    [reserve, paymentId],
+  );
+  if (claimed.length === 0) {
+    throw new PaymentError(409, "not_pending", "That withdrawal is no longer waiting for approval.");
+  }
+  try {
+    await sendB2c(
+      pool,
+      rails,
+      { id: paymentId, amountCents: row.amountCents, phone },
+      "Withdrawals need Daraja B2C credentials in the server environment.",
+    );
+  } catch (error) {
+    await pool.query(
+      "UPDATE payments SET checkout_request_id = NULL, status = 'pending', result_code = NULL WHERE id = ? AND checkout_request_id = ?",
+      [paymentId, reserve],
+    );
+    throw error;
+  }
+  const released = await byId(pool, paymentId);
+  if (released === null) throw new PaymentError(500, "server_error", "Something went wrong. Try again.");
+  if (rails.mode === "mock") {
+    await finishPaid(pool, released, null, "0");
+    const done = await byId(pool, paymentId);
+    if (done === null) throw new PaymentError(500, "server_error", "Something went wrong. Try again.");
+    return viewOf(done);
+  }
+  return viewOf(released);
+}
+
+export async function rejectWithdraw(pool: Db, paymentId: string): Promise<ReceiptView> {
+  const row = await byId(pool, paymentId);
+  if (row === null) {
+    throw new PaymentError(404, "unknown_payment", "That payment is not on the books.");
+  }
+  if (row.kind !== "withdraw") {
+    throw new PaymentError(422, "not_withdraw", "Only withdrawals wait for admin approval.");
+  }
+  if (row.status !== "pending" || row.checkoutRequestId !== null) {
+    throw new PaymentError(409, "not_pending", "That withdrawal is no longer waiting for approval.");
+  }
+  await setFailed(pool, paymentId, "rejected");
+  const rejected = await byId(pool, paymentId);
+  if (rejected === null) throw new PaymentError(500, "server_error", "Something went wrong. Try again.");
+  return viewOf(rejected);
 }
 
 export async function applyDarajaResult(
@@ -457,28 +551,19 @@ export async function startLoanPayout(
     throw new PaymentError(422, "bad_amount", "M-Pesa pays out at most KES 250,000.");
   }
   const id = randomBytes(16).toString("hex");
-  const created = new Date().toISOString();
+  const created = realNowIso();
   await pool.query(
     `INSERT INTO payments
       (id, member_id, idempotency_key, kind, amount_cents, counterparty_id, phone, status, created_at)
      VALUES (?, ?, ?, 'loan_out', ?, NULL, ?, 'pending', ?)`,
     [id, input.memberId, id, input.amountCents, input.phone, created],
   );
-  try {
-    const sent = await rails.b2c({ phone: input.phone, amountKsh: input.amountCents / 100, accountRef: id });
-    await pool.query("UPDATE payments SET checkout_request_id = ?, merchant_request_id = ? WHERE id = ?", [
-      sent.conversationId,
-      sent.originatorConversationId,
-      id,
-    ]);
-  } catch (error) {
-    const code = error instanceof Error && error.message === "mpesa_b2c_unconfigured" ? "b2c_off" : "mpesa";
-    await setFailed(pool, id, code);
-    if (code === "b2c_off") {
-      throw new PaymentError(503, "b2c_off", "Loan payouts need Daraja B2C credentials in the server environment.");
-    }
-    throw new PaymentError(502, "mpesa", "M-Pesa did not accept that payout. Try again.");
-  }
+  await sendB2c(
+    pool,
+    rails,
+    { id, amountCents: input.amountCents, phone: input.phone },
+    "Loan payouts need Daraja B2C credentials in the server environment.",
+  );
   return { paymentId: id };
 }
 
@@ -507,10 +592,10 @@ function formatReceiptWhen(iso: string): string {
 
 export function receiptPdfFor(row: ReceiptView): Buffer {
   if (row.status !== "succeeded" || row.receiptNumber === null || row.blockHash === null) {
-    throw new PaymentError(409, "not_ready", "The receipt is ready after the move is confirmed.");
+    throw new PaymentError(409, "not_ready", "The receipt is ready after the transaction is confirmed.");
   }
   const shillings = (row.amountCents / 100).toLocaleString("en-KE");
-  const kind = row.kind === "deposit" ? "Add" : row.kind === "withdraw" || row.kind === "loan_out" ? "Out" : "Send";
+  const kind = row.kind === "deposit" ? "Deposit" : row.kind === "withdraw" || row.kind === "loan_out" ? "Draw" : "Send";
   return receiptPdf({
     kind,
     amount: `KES ${shillings}`,

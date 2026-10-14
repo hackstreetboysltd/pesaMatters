@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api, type HomePayload } from "../api";
 import { AmountField } from "../components/AmountField";
-import { MarkBook, MarkCheck } from "../components/marks";
+import { MarkCheck } from "../components/marks";
 import { Nav } from "../components/Nav";
 import { Pot, StaticAmount } from "../components/Pot";
 import { formatKesShillings, formatShillingsTyping } from "../format";
@@ -95,58 +95,58 @@ export function Home(): React.ReactElement {
 
   return (
     <main className="home" id="main">
-      <header className="topbar">
-        <Link className="pot-chain" to="/ledger" aria-label="Ledger">
-          <MarkBook />
-        </Link>
-      </header>
       <section className="pot-band" aria-label={bandLabel}>
         {error !== null ? (
           <p className="alert" role="alert">
             {error}
           </p>
-        ) : data === null ? (
-          <Pot animate={false} share={0} />
         ) : (
           <div className="pot-stack">
-            <div className="goal">
-              <p className="goal-label" id="goal-label">
-                My Goal
-              </p>
-              {editingGoal ? (
-                <form className="goal-form" onSubmit={onSetGoal}>
-                  <AmountField
-                    value={goalDraft}
-                    onChange={setGoalDraft}
-                    required
-                    autoGrow
-                    enterSubmits
-                    inputRef={goalFieldRef}
-                    aria-labelledby="goal-label"
-                    accessory={
-                      <button type="submit" className="amount-save" aria-label="Save goal">
-                        <MarkCheck />
-                      </button>
-                    }
-                  />
-                  {goalError !== null ? (
-                    <p className="alert goal-alert" role="alert">
-                      {goalError}
-                    </p>
-                  ) : null}
-                </form>
-              ) : goalShillings !== null ? (
-                <button type="button" className="goal-amount" onClick={startEditGoal} aria-label="Edit goal">
-                  {formatKesShillings(goalShillings)}
-                </button>
-              ) : null}
-            </div>
-            <Pot animate={false} share={fillShare}>
-              <h1 className="claim-amount" style={{ ["--digits" as string]: String(digits) }}>
-                <span className="claim-currency">KES</span>
-                <StaticAmount value={shillings} />
-              </h1>
+            {data === null ? null : (
+              <div className="goal">
+                <p className="goal-label" id="goal-label">
+                  My Goal
+                </p>
+                {editingGoal ? (
+                  <form className="goal-form" onSubmit={onSetGoal}>
+                    <AmountField
+                      value={goalDraft}
+                      onChange={setGoalDraft}
+                      required
+                      autoGrow
+                      enterSubmits
+                      inputRef={goalFieldRef}
+                      aria-labelledby="goal-label"
+                      accessory={
+                        <button type="submit" className="amount-save" aria-label="Save goal">
+                          <MarkCheck />
+                        </button>
+                      }
+                    />
+                    {goalError !== null ? (
+                      <p className="alert goal-alert" role="alert">
+                        {goalError}
+                      </p>
+                    ) : null}
+                  </form>
+                ) : goalShillings !== null ? (
+                  <button type="button" className="goal-amount" onClick={startEditGoal} aria-label="Edit goal">
+                    {formatKesShillings(goalShillings)}
+                  </button>
+                ) : null}
+              </div>
+            )}
+            <Pot animate={false} share={data === null ? 0 : fillShare}>
+              {data === null ? null : (
+                <h1 className="claim-amount" style={{ ["--digits" as string]: String(digits) }}>
+                  <span className="claim-currency">KES</span>
+                  <StaticAmount value={shillings} />
+                </h1>
+              )}
             </Pot>
+            <Link className="primary pot-deposit" to="/transact?focus=amount">
+              Deposit
+            </Link>
           </div>
         )}
       </section>

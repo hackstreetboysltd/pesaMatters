@@ -4,7 +4,7 @@ import { safeReturnTo } from "../src/returnTo.ts";
 
 test("safeReturnTo keeps relative app paths", () => {
   assert.equal(safeReturnTo("/"), "/");
-  assert.equal(safeReturnTo("/move"), "/move");
+  assert.equal(safeReturnTo("/transact"), "/transact");
   assert.equal(safeReturnTo("/invest/abc?x=1"), "/invest/abc?x=1");
 });
 
