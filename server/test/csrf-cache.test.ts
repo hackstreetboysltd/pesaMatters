@@ -11,6 +11,33 @@ function listen(app: ReturnType<typeof createApp>): Promise<Server> {
   });
 }
 
+test("google code exchange does not require the csrf cookie", async () => {
+  const config = loadConfig({
+    DATABASE_URL: "postgres://local/test",
+    APP_ORIGIN: "http://127.0.0.1:8787",
+    COOKIE_SECURE: "false",
+    MPESA_MODE: "mock",
+  });
+  const app = createApp({} as Db, config);
+  const server = await listen(app);
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("no port");
+  try {
+    for (const path of ["/api/auth/google/callback", "/api/admin/auth/google/callback"]) {
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const body = (await response.json()) as { error?: { code?: string } };
+      assert.notEqual(response.status, 403);
+      assert.notEqual(body.error?.code, "csrf");
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
 test("csrf cookie is set even when the browser sends a cached validator", async () => {
   const config = loadConfig({
     DATABASE_URL: "postgres://local/test",

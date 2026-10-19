@@ -289,7 +289,12 @@ export function createApp(pool: Db, config: AppConfig, quotes: QuoteSource = cre
       req.method === "HEAD" ||
       req.method === "OPTIONS" ||
       MPESA_CALLBACKS.has(req.path) ||
-      req.path.startsWith("/api/cron/")
+      req.path.startsWith("/api/cron/") ||
+      // PKCE verifier lives in this tab's sessionStorage. A cross-site page cannot
+      // attach it, so the double-submit cookie only produces false `error=csrf`
+      // after the Google redirect (cookie blocked, partitioned, or not yet set).
+      req.path === "/api/auth/google/callback" ||
+      req.path === "/api/admin/auth/google/callback"
     ) {
       next();
       return;

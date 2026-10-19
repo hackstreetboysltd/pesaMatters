@@ -145,6 +145,11 @@ function readCookie(name: string): string | null {
   return null;
 }
 
+/** OAuth code exchange is authorized by the PKCE verifier, not the CSRF cookie. */
+function csrfExempt(path: string): boolean {
+  return path === "/api/auth/google/callback";
+}
+
 async function ensureCsrf(): Promise<string> {
   const existing = readCookie("hs_csrf");
   if (existing !== null) return existing;
@@ -172,7 +177,7 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
   const method = init.method ?? "GET";
   const headers = new Headers();
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  if (method !== "GET" && method !== "HEAD") {
+  if (method !== "GET" && method !== "HEAD" && !csrfExempt(path)) {
     headers.set("X-CSRF-Token", await ensureCsrf());
   }
   let response: Response;

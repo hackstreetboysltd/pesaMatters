@@ -130,6 +130,10 @@ function readCookie(name: string): string | null {
   return null;
 }
 
+function csrfExempt(path: string): boolean {
+  return path === "/api/admin/auth/google/callback";
+}
+
 async function ensureCsrf(): Promise<string> {
   const existing = readCookie("hs_csrf");
   if (existing !== null) return existing;
@@ -144,7 +148,9 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
   const method = init.method ?? "GET";
   const headers = new Headers();
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  if (method !== "GET" && method !== "HEAD") headers.set("X-CSRF-Token", await ensureCsrf());
+  if (method !== "GET" && method !== "HEAD" && !csrfExempt(path)) {
+    headers.set("X-CSRF-Token", await ensureCsrf());
+  }
   let response: Response;
   try {
     response = await fetch(path, {
