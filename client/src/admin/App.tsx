@@ -90,6 +90,8 @@ const ERRORS: Record<string, string> = {
   email_unverified: "That Google account has not verified its email.",
   rate_limited: "Too many sign-in attempts. Wait a few minutes and try again.",
   csrf: "Refresh the page and try again.",
+  network: "Could not reach the server. Check the network or pause the VPN, then try again.",
+  server_error: "The server could not finish sign-in. Try again in a moment.",
 };
 
 const FALLBACK = "Google sign-in did not finish. Try again.";

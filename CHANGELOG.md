@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-20
+
+### Fixed
+
+- Production admin Google sign-in failed with a generic `error=google` because Neon lacked `admins.google_sub` after the Desk→Admin cutover. Schema applied; `kakaiphil@gmail.com` seeded; `ADMIN_GOOGLE_EMAILS` set on Vercel.
+- Login pages no longer collapse `network` / `server_error` into the generic Google failure message.
+
 ## 2026-10-07
 
 ### Added
